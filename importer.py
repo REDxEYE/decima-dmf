@@ -1,7 +1,7 @@
 import json
 import logging
-from base64 import b64decode
 from collections import defaultdict
+from itertools import groupby
 from pathlib import Path
 from typing import cast, Optional, Dict, List
 
@@ -13,8 +13,7 @@ from mathutils import Vector, Quaternion, Matrix
 from DMFAddon.dmflib import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                              DMFNodeType, DMFModelGroup, DMFLodModel,
                              DMFPrimitive, DMFSceneFile, DMFSkeleton,
-                             DMFTexture, DMFInternalTexture,
-                             DMFExternalTexture, DMFSemantic, DMFComponentType)
+                             DMFSemantic, DMFComponentType, DMFInstance)
 from DMFAddon.material_utils import (clear_nodes, Nodes, create_node,
                                      connect_nodes, create_texture_node,
                                      create_material)
@@ -28,7 +27,7 @@ def get_logger(name) -> logging.Logger:
 
 LOGGER = get_logger("DMF::Loader")
 
-CONTEXT = dict()
+CONTEXT = {'collections': [], "instances": {}}
 
 
 def _convert_quat(quat):
@@ -94,26 +93,6 @@ def _convert_type_and_size(semantic: DMFSemantic, input_dtype_array: npt.NDArray
     return _convert(input_array)[:, element_start:element_end]
 
 
-def _all_same(items):
-    for first in items:
-        break
-    else:
-        return True  # empty case, note all([]) == True
-    return all(x == first for x in items)
-
-
-def _load_texture(texture: DMFTexture, scene: DMFSceneFile) -> bytes:
-    if isinstance(texture, DMFInternalTexture):
-        return b64decode(texture.buffer_data)
-    else:
-        assert isinstance(texture, DMFExternalTexture)
-        buffer_path = scene.buffers_path / texture.buffer_file_name
-        assert buffer_path.exists()
-        data = buffer_path.open('rb').read()
-        assert len(data) == texture.buffer_size
-        return data
-
-
 def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
     arm_data = bpy.data.armatures.new(name + "_ARMDATA")
     arm_obj = bpy.data.objects.new(name + "_ARM", arm_data)
@@ -150,43 +129,47 @@ def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
     return arm_obj
 
 
+def _load_texture(scene: DMFSceneFile, texture_id: int):
+    texture = scene.textures[texture_id]
+    if bpy.data.images.get(texture.name, None) is not None:
+        return
+    buffer = scene.buffers[texture.buffer_id]
+    image = bpy.data.images.new(texture.name, width=1, height=1)
+    image.pack(data=buffer.get_data(scene.buffers_path), data_len=buffer.size)
+    image.source = 'FILE'
+    image.use_fake_user = True
+    image.alpha_mode = 'CHANNEL_PACKED'
+
+
+def _get_texture(scene, texture_id):
+    texture = scene.textures[texture_id]
+    image = bpy.data.images.get(texture.name, None)
+    if image is None:
+        print(f"Texture {texture.name} not found")
+    return image
+
+
 def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
-    LOGGER.info(f"Creating material \"{material.name}\"")
-
-    for texture_id in material.texture_ids.values():
-        texture = scene.textures[texture_id]
-        if bpy.data.images.get(f"{texture.name}.{texture.data_type.name.lower()}", None) is not None:
-            continue
-        image = bpy.data.images.new(f"{texture.name}.{texture.data_type.name.lower()}", width=1, height=1)
-        texture_data = _load_texture(texture, scene)
-        image.pack(data=texture_data, data_len=len(texture_data))
-        image.source = 'FILE'
-        image.use_fake_user = True
-        image.alpha_mode = 'CHANNEL_PACKED'
-
-    for texture_descriptor in material.texture_descriptors:
-        if texture_descriptor.texture_id == -1:
-            continue
-        texture = scene.textures[texture_descriptor.texture_id]
-        if bpy.data.images.get(f"{texture.name}.{texture.data_type.name.lower()}", None) is not None:
-            continue
-        image = bpy.data.images.new(f"{texture.name}.{texture.data_type.name.lower()}", width=1, height=1)
-        texture_data = _load_texture(texture, scene)
-        image.pack(data=texture_data, data_len=len(texture_data))
-        image.source = 'FILE'
-        image.use_fake_user = True
-        image.alpha_mode = 'CHANNEL_PACKED'
-
-    def _get_texture(texture_id):
-        texture = scene.textures[texture_id]
-        image = bpy.data.images.get(f"{texture.name}.{texture.data_type.name.lower()}", None)
-        if image is None:
-            print(f"Texture {texture.name}.{texture.data_type.name.lower()} not found")
-        return image
+    LOGGER.debug(f"Creating material \"{material.name}\"")
 
     if bl_material.get("LOADED", False):
         return
     bl_material["LOADED"] = True
+
+    if not (material.texture_ids or material.texture_descriptors):
+        return
+
+    for texture_id in material.texture_ids.values():
+        if texture_id == -1:
+            continue
+        _load_texture(scene, texture_id)
+
+    sorted_descriptors = sorted(material.texture_descriptors, key=lambda a: a.texture_id)
+
+    for texture_id, _ in groupby(sorted_descriptors, key=lambda a: a.texture_id):
+        if texture_id == -1:
+            continue
+        _load_texture(scene, texture_id)
 
     bl_material.use_nodes = True
     clear_nodes(bl_material)
@@ -197,17 +180,21 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
     for semantic in material.texture_ids.keys():
         texture_id = material.texture_ids.get(semantic, None)
         if texture_id is None:
-            return None
-        create_texture_node(bl_material, _get_texture(texture_id), semantic)
-    for descriptor in material.texture_descriptors:
-        if descriptor.texture_id == -1:
             continue
-        create_texture_node(bl_material, _get_texture(descriptor.texture_id),
-                            descriptor.usage_type + "_" + descriptor.channels)
+        create_texture_node(bl_material, _get_texture(scene, texture_id), semantic)
+
+    for texture_id, texture_descriptors in groupby(sorted_descriptors, key=lambda a: a.texture_id):
+        if texture_id == -1:
+            continue
+        texture_description = []
+        for texture_descriptor in texture_descriptors:
+            texture_description.append(f"{texture_descriptor.usage_type}_{texture_descriptor.channels}")
+        create_texture_node(bl_material, _get_texture(scene, texture_id),
+                            " | ".join(texture_description))
 
 
-def import_dmf_model(model: DMFModel, scene: DMFSceneFile):
-    LOGGER.info(f"Loading \"{model.name}\" model")
+def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+    LOGGER.debug(f"Loading \"{model.name}\" model")
     if model.skeleton_id is not None:
         skeleton = import_dmf_skeleton(scene.skeletons[model.skeleton_id], model.name)
     else:
@@ -234,11 +221,11 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile):
             grouper.rotation_mode = "QUATERNION"
             grouper.rotation_quaternion = _convert_quat(model.transform.rotation)
             grouper.scale = model.transform.scale
+        parent_collection.objects.link(grouper)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(grouper)
 
-        for collection_id in model.collection_ids:
-            CONTEXT["collections"][collection_id].objects.link(grouper)
-
-        children = import_dmf_node(child, scene)
+        children = import_dmf_node(child, scene, parent_collection)
         if children is not None:
             children.parent = grouper
 
@@ -248,11 +235,13 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile):
         parent.rotation_quaternion = _convert_quat(model.transform.rotation)
         parent.scale = model.transform.scale
     if skeleton is not None:
-        for collection_id in model.collection_ids:
-            CONTEXT["collections"][collection_id].objects.link(skeleton)
+        parent_collection.objects.link(skeleton)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(skeleton)
     for primitive in primitives:
-        for collection_id in model.collection_ids:
-            CONTEXT["collections"][collection_id].objects.link(primitive)
+        parent_collection.objects.link(primitive)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(primitive)
 
     return parent
 
@@ -264,10 +253,6 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         primitive_groups[primitive.grouping_id].append(primitive)
 
     for primitive_group in primitive_groups.values():
-        assert _all_same([primitive.index_count for primitive in primitive_group])
-        assert _all_same([primitive.vertex_count for primitive in primitive_group])
-        assert _all_same([primitive.vertex_start for primitive in primitive_group])
-        assert _all_same([primitive.vertex_end for primitive in primitive_group])
         mesh_data = bpy.data.meshes.new(model.name + f"_MESH")
         mesh_obj = bpy.data.objects.new(model.name, mesh_data)
         material_ids = np.zeros(primitive_group[0].index_count // 3, np.int32)
@@ -312,7 +297,7 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
             normal_data = _convert_type_and_size(DMFSemantic.NORMAL, vertex_data, np.float32, element_end=3)
             mesh_data.normals_split_custom_set_from_vertices(normal_data)
 
-        mesh_data.polygons.foreach_set('material_index', material_ids)
+        mesh_data.polygons.foreach_set('material_index', material_ids[:all_indices.shape[0]])
 
         if skeleton is not None:
             _add_skinning(scene.skeletons[model.skeleton_id], mesh_obj, model.mesh, primitive_0, vertex_data)
@@ -352,8 +337,11 @@ def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMe
                 weight_groups[bone_index].add([n], bone_weights[i], "ADD")
 
 
-def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile):
-    LOGGER.info(f"Loading \"{model_group.name}\" model group")
+def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+    LOGGER.debug(f"Loading \"{model_group.name}\" model group")
+    # group_collection = bpy.data.collections.new(model_group.name)
+    # parent_collection.children.link(group_collection)
+
     group_obj = bpy.data.objects.new(model_group.name, None)
     if model_group.transform:
         group_obj.location = model_group.transform.position
@@ -362,47 +350,69 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile):
         group_obj.scale = model_group.transform.scale
 
     for child in model_group.children:
-        obj = import_dmf_node(child, scene)
+        obj = import_dmf_node(child, scene, parent_collection)
         if obj:
             obj.parent = group_obj
-
-    for collection_id in model_group.collection_ids:
-        collection = CONTEXT["collections"][collection_id]
-        collection.objects.link(group_obj)
+    parent_collection.objects.link(group_obj)
+    # for collection_id in model_group.collection_ids:
+    #     collection = CONTEXT["collections"][collection_id]
+    #     collection.objects.link(group_obj)
     return group_obj
 
 
-def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile):
+def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
     group_obj = bpy.data.objects.new(lod_model.name, None)
+    parent_collection.objects.link(group_obj)
     if lod_model.transform:
         group_obj.location = lod_model.transform.position
         group_obj.rotation_mode = "QUATERNION"
         group_obj.rotation_quaternion = _convert_quat(lod_model.transform.rotation)
         group_obj.scale = lod_model.transform.scale
-    obj = import_dmf_node(lod_model.lods[0].model, scene)
-    if obj:
-        obj.parent = group_obj
-
-    for child in lod_model.children:
-        obj = import_dmf_node(child, scene)
+    if lod_model.lods:
+        obj = import_dmf_node(lod_model.lods[0].model, scene, parent_collection)
         if obj:
             obj.parent = group_obj
 
+        for child in lod_model.children:
+            c_obj = import_dmf_node(child, scene, parent_collection)
+            if c_obj:
+                c_obj.parent = group_obj
     return group_obj
 
 
-def import_dmf_node(node: DMFNode, scene: DMFSceneFile):
+def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+    obj = bpy.data.objects.new(instance_model.name, None)
+    obj.empty_display_size = 4
+
+    if instance_model.instance_id != -1:
+        instance_name = CONTEXT["instances"][instance_model.instance_id]
+        obj.instance_type = 'COLLECTION'
+        obj.instance_collection = bpy.data.collections[instance_name]
+
+    if instance_model.transform:
+        obj.location = instance_model.transform.position
+        obj.rotation_mode = "QUATERNION"
+        obj.rotation_quaternion = _convert_quat(instance_model.transform.rotation)
+        obj.scale = instance_model.transform.scale
+
+    parent_collection.objects.link(obj)
+    return obj
+
+
+def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
     if node is None:
         return None
     if node.type == DMFNodeType.Model:
-        return import_dmf_model(cast(DMFModel, node), scene)
+        return import_dmf_model(cast(DMFModel, node), scene, parent_collection)
     elif node.type == DMFNodeType.LOD:
-        return import_dmf_lod(cast(DMFLodModel, node), scene)
+        return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection)
+    elif node.type == DMFNodeType.Instance:
+        return import_dmf_instance(cast(DMFInstance, node), scene, parent_collection)
     elif node.type == DMFNodeType.ModelGroup:
         model_group = cast(DMFModelGroup, node)
         if not model_group.children:
             return None
-        return import_dmf_model_group(model_group, scene)
+        return import_dmf_model_group(model_group, scene, parent_collection)
 
 
 def _collect_view_collections(parent):
@@ -413,26 +423,50 @@ def _collect_view_collections(parent):
 
 
 def import_dmf(scene: DMFSceneFile):
-    CONTEXT.clear()
+    CONTEXT["instances"].clear()
+    CONTEXT["collections"].clear()
 
     if scene.meta_data.version != 1:
         raise ValueError(f"Version {scene.meta_data.version} is not supported!")
 
-    collections = CONTEXT["collections"] = []
-    for collection_desc in scene.collections:
-        collection = bpy.data.collections.new(collection_desc.name)
-        if collection_desc.parent is not None:
-            parent = collections[collection_desc.parent]
-            parent.children.link(collection)
-        else:
-            bpy.context.scene.collection.children.link(collection)
-        collections.append(collection)
-        for layer_collection in _collect_view_collections(bpy.context.scene.view_layers[0].layer_collection):
-            if layer_collection.collection.name == collection.name:
-                layer_collection.exclude = not collection_desc.enabled
+    # collections = CONTEXT["collections"] = []
 
-    for node in scene.models:
-        import_dmf_node(node, scene)
+    # for collection_desc in scene.collections:
+    #     collection = bpy.data.collections.new(collection_desc.name)
+    #     if collection_desc.parent is not None:
+    #         parent = collections[collection_desc.parent]
+    #         parent.children.link(collection)
+    #     else:
+    #         bpy.context.scene.collection.children.link(collection)
+    #     collections.append(collection)
+    #     for layer_collection in _collect_view_collections(bpy.context.scene.view_layers[0].layer_collection):
+    #         if layer_collection.collection.name == collection.name:
+    #             layer_collection.exclude = not collection_desc.enabled
+
+    instances_collection = bpy.data.collections.new("INSTANCES")
+    bpy.context.scene.collection.children.link(instances_collection)
+
+    for layer_collection in _collect_view_collections(bpy.context.scene.view_layers[0].layer_collection):
+        if layer_collection.collection.name == instances_collection.name:
+            layer_collection.exclude = True
+
+    LOGGER.info(f"Loading {len(scene.instances)} instances")
+    for i, node in enumerate(scene.instances):
+        if i % 100 == 0:
+            LOGGER.info(f"Load progress {i + 1}/{len(scene.instances)}")
+        instance_collection = bpy.data.collections.new(node.name)
+        instances_collection.children.link(instance_collection)
+        import_dmf_node(node, scene, instance_collection)
+        CONTEXT["instances"][i] = instance_collection.name
+
+    master_collection = bpy.data.collections.new("MASTER")
+    bpy.context.scene.collection.children.link(master_collection)
+
+    LOGGER.info(f"Loading {len(scene.models)} Objects")
+    for i, node in enumerate(scene.models):
+        if i % 100 == 0:
+            LOGGER.info(f"Load progress {i + 1}/{len(scene.models)}")
+        import_dmf_node(node, scene, master_collection)
 
 
 def import_dmf_from_path(file: Path):

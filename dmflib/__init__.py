@@ -1,3 +1,4 @@
+import zlib
 from base64 import b64decode
 from collections import defaultdict
 from dataclasses import dataclass, asdict, field
@@ -37,6 +38,7 @@ class DMFSemantic(Enum):
 
 class DMFComponentType(Enum):
     SIGNED_SHORT = "SignedShort", np.int16
+    UNSIGNED_SHORT = "UnsignedShort", np.uint16
     SIGNED_SHORT_NORMALIZED = "SignedShortNormalized", np.int16
     UNSIGNED_SHORT_NORMALIZED = "UnsignedShortNormalized", np.uint16
     UNSIGNED_BYTE = "UnsignedByte", np.uint8
@@ -57,6 +59,7 @@ class DMFNodeType(Enum):
     Model = "Model"
     ModelGroup = "ModelGroup"
     LOD = "LOD"
+    Instance = "Instance"
 
 
 @runtime_checkable
@@ -70,7 +73,7 @@ class JsonSerializable(Protocol):
         raise NotImplementedError()
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFTextureDescriptor(JsonSerializable):
     texture_id: int
     channels: str
@@ -84,7 +87,7 @@ class DMFTextureDescriptor(JsonSerializable):
         return cls(data["textureId"], data["channels"], data["usageType"])
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFSceneMetaData(JsonSerializable):
     generator: str
     version: int
@@ -97,26 +100,28 @@ class DMFSceneMetaData(JsonSerializable):
         return cls(**data)
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFTexture(JsonSerializable):
     name: str
-    data_type: DMFDataType
-    buffer_size: int
+    buffer_id: int
     usage_type: int
     metadata: Dict[str, str]
 
     def to_json(self):
-        raise NotImplementedError()
+        return {
+            "name": self.name,
+            "bufferId": self.buffer_id,
+            "usageType": self.usage_type,
+            "metadata": self.metadata
+
+        }
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]):
-        if "bufferData" in data:
-            return DMFInternalTexture.from_json(data)
-        else:
-            return DMFExternalTexture.from_json(data)
+        return cls(data["name"], data["bufferId"], data.get("usageType", 0), data.get("metadata", {}))
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFCollection(JsonSerializable):
     name: str
     enabled: bool = field(default=True)
@@ -130,7 +135,7 @@ class DMFCollection(JsonSerializable):
         return cls(data["name"], data.get("enabled", True), data.get("parent", None))
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFTransform(JsonSerializable):
     position: Tuple[float, float, float]
     scale: Tuple[float, float, float]
@@ -144,7 +149,7 @@ class DMFTransform(JsonSerializable):
         return cls(**data)
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFBone(JsonSerializable):
     name: str
     transform: DMFTransform
@@ -169,25 +174,38 @@ class DMFBone(JsonSerializable):
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFBuffer(JsonSerializable):
-    original_name: str
-    buffer_size: int
-    buffer_data: str
+    name: str
+    size: int
+    path: Optional[str]
+    data: Optional[str]
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]):
-        return cls(data["originalName"], data["bufferSize"], data["bufferData"])
+        return cls(data.get("name", "<NONE>"), data["size"], data.get("path", None), data.get("data", None))
 
     def to_json(self):
         return {
-            "originalName": self.original_name,
-            "bufferSize": self.buffer_size,
-            "bufferData": self.buffer_data,
+            "name": self.name,
+            "size": self.size,
+            "data": self.data,
+            "path": self.path
         }
 
+    def get_data(self, data_path: Path):
+        if self.path is not None:
+            with (data_path / self.path).open("rb") as f:
+                data = f.read()
+        elif self.data is not None:
+            data = zlib.decompress(b64decode(self.data))
+        else:
+            raise ValueError("Data/Path are missing")
+        assert len(data) == self.size
+        return data
 
-@dataclass
+
+@dataclass(slots=True)
 class DMFBufferView(JsonSerializable):
     buffer_id: int
     offset: int
@@ -201,7 +219,7 @@ class DMFBufferView(JsonSerializable):
         return cls(data["bufferId"], data["offset"], data["size"])
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFSkeleton(JsonSerializable):
     bones: List[DMFBone]
     transform: Optional[DMFTransform]
@@ -215,7 +233,7 @@ class DMFSkeleton(JsonSerializable):
         return cls([DMFBone.from_json(item) for item in data.get("bones", [])], transform)
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFMaterial(JsonSerializable):
     name: str
     type: str
@@ -236,7 +254,7 @@ class DMFMaterial(JsonSerializable):
                    [DMFTextureDescriptor.from_json(desc) for desc in data.get("textureDescriptors", [])])
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFNode(JsonSerializable):
     type: DMFNodeType
     name: Optional[str]
@@ -266,11 +284,14 @@ class DMFNode(JsonSerializable):
         elif node_type == DMFNodeType.LOD:
             return DMFLodModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
                                [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])])
+        elif node_type == DMFNodeType.Instance:
+            return DMFInstance(node_type, name, collection_ids, transform, children, data.get("visible", True),
+                               data["instanceId"])
         else:
             return DMFNode(node_type, name, collection_ids, transform, children, data.get("visible", True))
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFSceneFile(JsonSerializable):
     meta_data: DMFSceneMetaData
     collections: List[DMFCollection]
@@ -280,6 +301,7 @@ class DMFSceneFile(JsonSerializable):
     buffer_views: List[DMFBufferView]
     materials: List[DMFMaterial]
     textures: List[DMFTexture]
+    instances: List[DMFNode]
 
     _buffers_path: Optional[Path] = field(default=None)
 
@@ -292,6 +314,7 @@ class DMFSceneFile(JsonSerializable):
             "bufferViews": [item.to_json() for item in self.buffer_views],
             "materials": [item.to_json() for item in self.materials],
             "textures": [item.to_json() for item in self.textures],
+            "instances": [item.to_json() for item in self.instances],
         }
 
     @classmethod
@@ -305,6 +328,7 @@ class DMFSceneFile(JsonSerializable):
             [DMFBufferView.from_json(item) for item in data.get("bufferViews", [])],
             [DMFMaterial.from_json(item) for item in data.get("materials", [])],
             [DMFTexture.from_json(item) for item in data.get("textures", [])],
+            [DMFNode.from_json(item) for item in data.get("instances", [])],
         )
 
     def set_buffers_path(self, buffers_path: Path):
@@ -316,49 +340,7 @@ class DMFSceneFile(JsonSerializable):
         return self._buffers_path
 
 
-@dataclass
-class DMFInternalTexture(DMFTexture):
-    buffer_data: str
-
-    def to_json(self):
-        return {
-            "name": self.name,
-            "bufferData": self.buffer_data,
-            "bufferSize": self.buffer_size,
-            "dataType": self.data_type,
-            "usageType": self.usage_type,
-            "metadata": self.metadata
-
-        }
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]):
-        return cls(data["name"], DMFDataType(data["dataType"]), data["bufferSize"],
-                   data.get("usageType", 0), data.get("metadata", {}), data["bufferData"])
-
-
-@dataclass
-class DMFExternalTexture(DMFTexture):
-    buffer_file_name: str
-
-    def to_json(self):
-        return {
-            "name": self.name,
-            "bufferFileName": self.buffer_file_name,
-            "bufferSize": self.buffer_size,
-            "dataType": self.data_type,
-            "usageType": self.usage_type,
-            "metadata": self.metadata
-
-        }
-
-    @classmethod
-    def from_json(cls, data: Dict[str, Any]):
-        return cls(data["name"], DMFDataType(data["dataType"]), data["bufferSize"],
-                   data.get("usageType", 0), data.get("metadata", {}), data["bufferFileName"])
-
-
-@dataclass
+@dataclass(slots=True)
 class DMFVertexAttribute(JsonSerializable):
     semantic: DMFSemantic
     element_count: int
@@ -404,11 +386,11 @@ class VertexType(Enum):
 
 def _load_buffer_view(buffer_view: DMFBufferView, scene: DMFSceneFile) -> bytes:
     buffer = scene.buffers[buffer_view.buffer_id]
-    buffer_data = b64decode(buffer.buffer_data)
+    buffer_data = buffer.get_data(scene.buffers_path)
     return buffer_data[buffer_view.offset:buffer_view.offset + buffer_view.size]
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFPrimitive(JsonSerializable):
     grouping_id: int
     vertex_count: int
@@ -511,7 +493,7 @@ class DMFPrimitive(JsonSerializable):
         return np.frombuffer(buffer_data, dtype)[self.index_start:self.index_end].reshape((-1, 3))
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFMesh(JsonSerializable):
     primitives: List[DMFPrimitive]
     bone_remap_table: Dict[int, int]
@@ -529,18 +511,18 @@ class DMFMesh(JsonSerializable):
         return cls([DMFPrimitive.from_json(item) for item in data.get("primitives", [])], remap_table)
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFModelGroup(DMFNode):
     pass
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFModel(DMFNode):
     mesh: DMFMesh
     skeleton_id: int
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFLod(JsonSerializable):
     model: DMFNode
     lod_id: int
@@ -554,6 +536,11 @@ class DMFLod(JsonSerializable):
         return {"model": self.model.to_json() if self.model else None, "id": self.lod_id, "distance": self.distance}
 
 
-@dataclass
+@dataclass(slots=True)
 class DMFLodModel(DMFNode):
     lods: List[DMFLod]
+
+
+@dataclass(slots=True)
+class DMFInstance(DMFNode):
+    instance_id: int
