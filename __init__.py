@@ -1,6 +1,6 @@
 import bpy
 
-from DMFAddon.operators import DMF_OT_DMFImport
+from .operators import DMF_OT_DMFImport
 
 bl_info = {
     "name": "DMF Import plugin",

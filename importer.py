@@ -10,13 +10,13 @@ import numpy as np
 import numpy.typing as npt
 from mathutils import Vector, Quaternion, Matrix
 
-from DMFAddon.dmflib import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
-                             DMFNodeType, DMFModelGroup, DMFLodModel,
-                             DMFPrimitive, DMFSceneFile, DMFSkeleton,
-                             DMFSemantic, DMFComponentType, DMFInstance)
-from DMFAddon.material_utils import (clear_nodes, Nodes, create_node,
-                                     connect_nodes, create_texture_node,
-                                     create_material)
+from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
+                  DMFNodeType, DMFModelGroup, DMFLodModel,
+                  DMFPrimitive, DMFSceneFile, DMFSkeleton,
+                  DMFSemantic, DMFComponentType, DMFInstance)
+from .material_utils import (clear_nodes, Nodes, create_node,
+                             connect_nodes, create_texture_node,
+                             create_material)
 
 
 def get_logger(name) -> logging.Logger:
