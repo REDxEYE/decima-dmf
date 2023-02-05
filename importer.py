@@ -13,7 +13,7 @@ from mathutils import Vector, Quaternion, Matrix
 from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFNodeType, DMFModelGroup, DMFLodModel,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
-                  DMFSemantic, DMFComponentType, DMFInstance)
+                  DMFSemantic, DMFComponentType, DMFInstance, VertexType, DMFBufferView)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -41,12 +41,6 @@ def _get_or_create_collection(name, parent: bpy.types.Collection) -> bpy.types.C
         parent.children.link(new_collection)
     new_collection.name = name
     return new_collection
-
-
-def _add_uv(mesh_data: bpy.types.Mesh, uv_name: str, uv_data: npt.NDArray[float]):
-    uv_layer = mesh_data.uv_layers.new(name=uv_name)
-    uv_layer_data = uv_data.copy()
-    uv_layer.data.foreach_set('uv', uv_layer_data.flatten())
 
 
 def _convert_type_and_size(semantic: DMFSemantic, input_dtype_array: npt.NDArray, output_dtype: npt.DTypeLike,
@@ -93,42 +87,6 @@ def _convert_type_and_size(semantic: DMFSemantic, input_dtype_array: npt.NDArray
     return _convert(input_array)[:, element_start:element_end]
 
 
-def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
-    arm_data = bpy.data.armatures.new(name + "_ARMDATA")
-    arm_obj = bpy.data.objects.new(name + "_ARM", arm_data)
-    bpy.context.scene.collection.objects.link(arm_obj)
-
-    arm_obj.show_in_front = True
-    arm_obj.select_set(True)
-    bpy.context.view_layer.objects.active = arm_obj
-    bpy.ops.object.mode_set(mode='EDIT')
-
-    bones = []
-    for bone in skeleton.bones:
-        bl_bone = arm_data.edit_bones.new(bone.name)
-        bl_bone.tail = Vector([0, 0, 0.1]) + bl_bone.head
-        bones.append(bl_bone)
-
-        if bone.parent_id != -1:
-            bl_bone.parent = bones[bone.parent_id]
-
-        bone_pos = bone.transform.position
-        bone_rot = bone.transform.rotation
-
-        bone_pos = Vector(bone_pos)
-        # noinspection PyTypeChecker
-        bone_rot = Quaternion(_convert_quat(bone_rot))
-        mat = Matrix.Translation(bone_pos) @ bone_rot.to_matrix().to_4x4()
-        if bone.local_space and bl_bone.parent:
-            bl_bone.matrix = bl_bone.parent.matrix @ mat
-        else:
-            bl_bone.matrix = mat
-
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.context.scene.collection.objects.unlink(arm_obj)
-    return arm_obj
-
-
 def _load_texture(scene: DMFSceneFile, texture_id: int):
     texture = scene.textures[texture_id]
     if bpy.data.images.get(texture.name, None) is not None:
@@ -149,101 +107,58 @@ def _get_texture(scene, texture_id):
     return image
 
 
-def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
-    LOGGER.debug(f"Creating material \"{material.name}\"")
-
-    if bl_material.get("LOADED", False):
-        return
-    bl_material["LOADED"] = True
-
-    if not (material.texture_ids or material.texture_descriptors):
-        return
-
-    for texture_id in material.texture_ids.values():
-        if texture_id == -1:
-            continue
-        _load_texture(scene, texture_id)
-
-    sorted_descriptors = sorted(material.texture_descriptors, key=lambda a: a.texture_id)
-
-    for texture_id, _ in groupby(sorted_descriptors, key=lambda a: a.texture_id):
-        if texture_id == -1:
-            continue
-        _load_texture(scene, texture_id)
-
-    bl_material.use_nodes = True
-    clear_nodes(bl_material)
-    output_node = create_node(bl_material, Nodes.ShaderNodeOutputMaterial)
-    bsdf_node = create_node(bl_material, Nodes.ShaderNodeBsdfPrincipled)
-    connect_nodes(bl_material, output_node.inputs[0], bsdf_node.outputs[0])
-
-    for semantic in material.texture_ids.keys():
-        texture_id = material.texture_ids.get(semantic, None)
-        if texture_id is None:
-            continue
-        create_texture_node(bl_material, _get_texture(scene, texture_id), semantic)
-
-    for texture_id, texture_descriptors in groupby(sorted_descriptors, key=lambda a: a.texture_id):
-        if texture_id == -1:
-            continue
-        texture_description = []
-        for texture_descriptor in texture_descriptors:
-            texture_description.append(f"{texture_descriptor.usage_type}_{texture_descriptor.channels}")
-        create_texture_node(bl_material, _get_texture(scene, texture_id),
-                            " | ".join(texture_description))
+def _get_buffer_view_data(buffer_view: DMFBufferView, scene: DMFSceneFile) -> bytes:
+    buffer = scene.buffers[buffer_view.buffer_id]
+    buffer_data = buffer.get_data(scene.buffers_path)
+    return buffer_data[buffer_view.offset:buffer_view.offset + buffer_view.size]
 
 
-def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
-    LOGGER.debug(f"Loading \"{model.name}\" model")
-    if model.skeleton_id is not None:
-        skeleton = import_dmf_skeleton(scene.skeletons[model.skeleton_id], model.name)
+def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
+    mode = primitive.vertex_type
+    dtype_fields = []
+    dtype_metadata: Dict[str, str] = {}
+    for attribute in primitive.vertex_attributes.values():
+        if attribute.element_count > 1:
+            dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype, attribute.element_count))
+        else:
+            dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype))
+        dtype_metadata[attribute.semantic.name] = attribute.element_type.name
+    dtype = np.dtype(dtype_fields, metadata=dtype_metadata)
+    if mode == VertexType.SINGLE_BUFFER:
+        data = np.zeros(primitive.vertex_count, dtype)
+        buffer_groups = defaultdict(list)
+        for attr in primitive.vertex_attributes.values():
+            buffer_groups[attr.buffer_view_id].append(attr)
+
+        for buffer_view_id, attributes in buffer_groups.items():
+            stream_dtype_fields = []
+            stream_dtype_metadata: Dict[str, str] = {}
+            sorted_attributes = sorted(attributes, key=lambda a: a.offset)
+            for attribute in sorted_attributes:
+                if attribute.element_count > 1:
+                    stream_dtype_fields.append(
+                        (attribute.semantic.name, attribute.element_type.dtype, attribute.element_count))
+                else:
+                    stream_dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype))
+                stream_dtype_metadata[attribute.semantic.name] = attribute.element_type.name
+            stream_dtype = np.dtype(stream_dtype_fields, metadata=dtype_metadata)
+
+            buffer_data = _get_buffer_view_data(scene.buffer_views[buffer_view_id], scene)
+            stream = np.frombuffer(buffer_data, stream_dtype, primitive.vertex_count)
+            for attribute in attributes:
+                data[attribute.semantic.name] = stream[attribute.semantic.name]
     else:
-        skeleton = None
+        data = np.zeros(primitive.vertex_count, dtype)
+        for attribute in primitive.vertex_attributes.values():
+            data[attribute.semantic][:] = primitive.vertex_attributes[attribute.semantic].convert(scene)[
+                                          primitive.vertex_start:primitive.vertex_end]
+    return data
 
-    primitives = _load_primitives(model, scene, skeleton)
 
-    if skeleton is not None:
-        parent = skeleton
-        for primitive in primitives:
-            modifier = primitive.modifiers.new(type="ARMATURE", name="Armature")
-            modifier.object = skeleton
-    else:
-        parent = bpy.data.objects.new(model.name + "_ROOT", None)
-
-    for primitive in primitives:
-        primitive.parent = parent
-
-    for child in model.children:
-        grouper = bpy.data.objects.new(model.name + "_CHILDREN", None)
-        grouper.parent = parent
-        if model.transform:
-            grouper.location = model.transform.position
-            grouper.rotation_mode = "QUATERNION"
-            grouper.rotation_quaternion = _convert_quat(model.transform.rotation)
-            grouper.scale = model.transform.scale
-        parent_collection.objects.link(grouper)
-        # for collection_id in model.collection_ids:
-        #     CONTEXT["collections"][collection_id].objects.link(grouper)
-
-        children = import_dmf_node(child, scene, parent_collection)
-        if children is not None:
-            children.parent = grouper
-
-    if model.transform is not None:
-        parent.location = model.transform.position
-        parent.rotation_mode = "QUATERNION"
-        parent.rotation_quaternion = _convert_quat(model.transform.rotation)
-        parent.scale = model.transform.scale
-    if skeleton is not None:
-        parent_collection.objects.link(skeleton)
-        # for collection_id in model.collection_ids:
-        #     CONTEXT["collections"][collection_id].objects.link(skeleton)
-    for primitive in primitives:
-        parent_collection.objects.link(primitive)
-        # for collection_id in model.collection_ids:
-        #     CONTEXT["collections"][collection_id].objects.link(primitive)
-
-    return parent
+def _get_primitives_indices(primitive: DMFPrimitive, scene: DMFSceneFile):
+    buffer_data = _get_buffer_view_data(scene.buffer_views[primitive.index_buffer_view_id], scene)
+    dtype = np.uint16 if primitive.index_size == 2 else np.uint32
+    return np.frombuffer(buffer_data, dtype)[primitive.index_start:primitive.index_end].reshape((-1, 3))
 
 
 def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.Object):
@@ -257,7 +172,7 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         mesh_obj = bpy.data.objects.new(model.name, mesh_data)
         material_ids = np.zeros(primitive_group[0].index_count // 3, np.int32)
         material_id = 0
-        vertex_data = primitive_group[0].get_vertices(scene)
+        vertex_data = _get_primitive_vertex_data(primitive_group[0], scene)
         total_indices: List[npt.NDArray[np.uint32]] = []
         primitive_0 = primitive_group[0]
         for primitive in primitive_group:
@@ -267,7 +182,7 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
             material_ids[primitive.index_start // 3:primitive.index_end // 3] = material_id
             material_id += 1
 
-            indices = primitive.get_indices(scene)
+            indices = _get_primitives_indices(primitive, scene)
             total_indices.append(indices)
 
         all_indices = np.vstack(total_indices)
@@ -337,10 +252,149 @@ def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMe
                 weight_groups[bone_index].add([n], bone_weights[i], "ADD")
 
 
+def _add_uv(mesh_data: bpy.types.Mesh, uv_name: str, uv_data: npt.NDArray[float]):
+    uv_layer = mesh_data.uv_layers.new(name=uv_name)
+    uv_layer_data = uv_data.copy()
+    uv_layer.data.foreach_set('uv', uv_layer_data.flatten())
+
+
+def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
+    LOGGER.debug(f"Creating material \"{material.name}\"")
+
+    if bl_material.get("LOADED", False):
+        return
+    bl_material["LOADED"] = True
+
+    if not (material.texture_ids or material.texture_descriptors):
+        return
+
+    for texture_id in material.texture_ids.values():
+        if texture_id == -1:
+            continue
+        _load_texture(scene, texture_id)
+
+    sorted_descriptors = sorted(material.texture_descriptors, key=lambda a: a.texture_id)
+
+    for texture_id, _ in groupby(sorted_descriptors, key=lambda a: a.texture_id):
+        if texture_id == -1:
+            continue
+        _load_texture(scene, texture_id)
+
+    bl_material.use_nodes = True
+    clear_nodes(bl_material)
+    output_node = create_node(bl_material, Nodes.ShaderNodeOutputMaterial)
+    bsdf_node = create_node(bl_material, Nodes.ShaderNodeBsdfPrincipled)
+    connect_nodes(bl_material, output_node.inputs[0], bsdf_node.outputs[0])
+
+    for semantic in material.texture_ids.keys():
+        texture_id = material.texture_ids.get(semantic, None)
+        if texture_id is None:
+            continue
+        create_texture_node(bl_material, _get_texture(scene, texture_id), semantic)
+
+    for texture_id, texture_descriptors in groupby(sorted_descriptors, key=lambda a: a.texture_id):
+        if texture_id == -1:
+            continue
+        texture_description = []
+        for texture_descriptor in texture_descriptors:
+            texture_description.append(f"{texture_descriptor.usage_type}_{texture_descriptor.channels}")
+        create_texture_node(bl_material, _get_texture(scene, texture_id),
+                            " | ".join(texture_description))
+
+
+def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
+    arm_data = bpy.data.armatures.new(name + "_ARMDATA")
+    arm_obj = bpy.data.objects.new(name + "_ARM", arm_data)
+    bpy.context.scene.collection.objects.link(arm_obj)
+
+    arm_obj.show_in_front = True
+    arm_obj.select_set(True)
+    bpy.context.view_layer.objects.active = arm_obj
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    bones = []
+    for bone in skeleton.bones:
+        bl_bone = arm_data.edit_bones.new(bone.name)
+        bl_bone.tail = Vector([0, 0, 0.1]) + bl_bone.head
+        bones.append(bl_bone)
+
+        if bone.parent_id != -1:
+            bl_bone.parent = bones[bone.parent_id]
+
+        bone_pos = bone.transform.position
+        bone_rot = bone.transform.rotation
+
+        bone_pos = Vector(bone_pos)
+        # noinspection PyTypeChecker
+        bone_rot = Quaternion(_convert_quat(bone_rot))
+        mat = Matrix.Translation(bone_pos) @ bone_rot.to_matrix().to_4x4()
+        if bone.local_space and bl_bone.parent:
+            bl_bone.matrix = bl_bone.parent.matrix @ mat
+        else:
+            bl_bone.matrix = mat
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.scene.collection.objects.unlink(arm_obj)
+    return arm_obj
+
+
+def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+    LOGGER.debug(f"Loading \"{model.name}\" model")
+    if model.skeleton_id is not None:
+        skeleton = import_dmf_skeleton(scene.skeletons[model.skeleton_id], model.name)
+    else:
+        skeleton = None
+
+    primitives = _load_primitives(model, scene, skeleton)
+
+    if skeleton is not None:
+        parent = skeleton
+        for primitive in primitives:
+            modifier = primitive.modifiers.new(type="ARMATURE", name="Armature")
+            modifier.object = skeleton
+    else:
+        parent = bpy.data.objects.new(model.name + "_ROOT", None)
+
+    for primitive in primitives:
+        primitive.parent = parent
+
+    for child in model.children:
+        grouper = bpy.data.objects.new(model.name + "_CHILDREN", None)
+        grouper.parent = parent
+        if model.transform:
+            grouper.location = model.transform.position
+            grouper.rotation_mode = "QUATERNION"
+            grouper.rotation_quaternion = _convert_quat(model.transform.rotation)
+            grouper.scale = model.transform.scale
+        parent_collection.objects.link(grouper)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(grouper)
+
+        children = import_dmf_node(child, scene, parent_collection)
+        if children is not None:
+            children.parent = grouper
+
+    if model.transform is not None:
+        parent.location = model.transform.position
+        parent.rotation_mode = "QUATERNION"
+        parent.rotation_quaternion = _convert_quat(model.transform.rotation)
+        parent.scale = model.transform.scale
+    if skeleton is not None:
+        parent_collection.objects.link(skeleton)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(skeleton)
+    for primitive in primitives:
+        parent_collection.objects.link(primitive)
+        # for collection_id in model.collection_ids:
+        #     CONTEXT["collections"][collection_id].objects.link(primitive)
+
+    return parent
+
+
 def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
     LOGGER.debug(f"Loading \"{model_group.name}\" model group")
-    # group_collection = bpy.data.collections.new(model_group.name)
-    # parent_collection.children.link(group_collection)
+    group_collection = bpy.data.collections.new(model_group.name)
+    parent_collection.children.link(group_collection)
 
     group_obj = bpy.data.objects.new(model_group.name, None)
     if model_group.transform:
@@ -350,10 +404,10 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, pare
         group_obj.scale = model_group.transform.scale
 
     for child in model_group.children:
-        obj = import_dmf_node(child, scene, parent_collection)
+        obj = import_dmf_node(child, scene, group_collection)
         if obj:
             obj.parent = group_obj
-    parent_collection.objects.link(group_obj)
+    group_collection.objects.link(group_obj)
     # for collection_id in model_group.collection_ids:
     #     collection = CONTEXT["collections"][collection_id]
     #     collection.objects.link(group_obj)
@@ -380,7 +434,7 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
     return group_obj
 
 
-def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.types.Collection):
     obj = bpy.data.objects.new(instance_model.name, None)
     obj.empty_display_size = 4
 
@@ -407,7 +461,7 @@ def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.t
     elif node.type == DMFNodeType.LOD:
         return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection)
     elif node.type == DMFNodeType.Instance:
-        return import_dmf_instance(cast(DMFInstance, node), scene, parent_collection)
+        return import_dmf_instance(cast(DMFInstance, node), parent_collection)
     elif node.type == DMFNodeType.ModelGroup:
         model_group = cast(DMFModelGroup, node)
         if not model_group.children:
