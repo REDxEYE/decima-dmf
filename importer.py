@@ -13,7 +13,8 @@ from mathutils import Vector, Quaternion, Matrix
 from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFNodeType, DMFModelGroup, DMFLodModel,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
-                  DMFSemantic, DMFComponentType, DMFInstance, VertexType, DMFBufferView)
+                  DMFSemantic, DMFComponentType, DMFInstance,
+                  VertexType, DMFBufferView, DMFTextureDescriptor)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -292,14 +293,85 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
             continue
         create_texture_node(bl_material, _get_texture(scene, texture_id), semantic)
 
+    descriptor_to_socket = defaultdict(list)
+    print('************')
     for texture_id, texture_descriptors in groupby(sorted_descriptors, key=lambda a: a.texture_id):
         if texture_id == -1:
             continue
         texture_description = []
+        texture_descriptors: List[DMFTextureDescriptor] = list(texture_descriptors)
+        use_rgb_split = False
+        non_color = False
         for texture_descriptor in texture_descriptors:
+            print(texture_descriptor)
+            if texture_descriptor.channels not in ("RGBA", "RGB", "A"):
+                use_rgb_split = True
+                non_color = True
+            if texture_descriptor == "Normal":
+                non_color = True
             texture_description.append(f"{texture_descriptor.usage_type}_{texture_descriptor.channels}")
-        create_texture_node(bl_material, _get_texture(scene, texture_id),
-                            " | ".join(texture_description))
+        texture_node = create_texture_node(bl_material, _get_texture(scene, texture_id),
+                                           " | ".join(texture_description))
+
+        if non_color:
+            texture_node.image.colorspace_settings.name = 'Non-Color'
+
+        if use_rgb_split:
+            rgb_split = create_node(bl_material, Nodes.ShaderNodeSeparateRGB)
+            connect_nodes(bl_material, texture_node.outputs["Color"], rgb_split.inputs[0])
+            for texture_descriptor in texture_descriptors:
+                for channel in texture_descriptor.channels:
+                    if channel in "RGB":
+                        if texture_descriptor.usage_type == "Color":
+                            descriptor_to_socket[texture_descriptor.usage_type + "_" + channel].append(
+                                rgb_split.outputs["RGB".index(channel)])
+                        else:
+                            descriptor_to_socket[texture_descriptor.usage_type].append(
+                                rgb_split.outputs["RGB".index(channel)])
+                    elif channel == "A":
+                        descriptor_to_socket[texture_descriptor.usage_type].append(texture_node.outputs[1])
+        else:
+            for texture_descriptor in texture_descriptors:
+                if texture_descriptor.channels == "RGB":
+                    descriptor_to_socket[texture_descriptor.usage_type].append(texture_node.outputs[0])
+                elif texture_descriptor.channels == "RGBA":
+                    descriptor_to_socket[texture_descriptor.usage_type].append(texture_node.outputs[0])
+                elif texture_descriptor.channels == "A":
+                    descriptor_to_socket[texture_descriptor.usage_type].append(texture_node.outputs[1])
+
+    if "Color" in descriptor_to_socket:
+        socket = descriptor_to_socket["Color"][0]
+        connect_nodes(bl_material, socket, bsdf_node.inputs["Base Color"])
+
+    if "Roughness" in descriptor_to_socket:
+        socket = descriptor_to_socket["Roughness"][0]
+        connect_nodes(bl_material, socket, bsdf_node.inputs["Roughness"])
+
+    if "Reflectance" in descriptor_to_socket:
+        socket = descriptor_to_socket["Reflectance"][0]
+        invert_node = create_node(bl_material, Nodes.ShaderNodeInvert)
+        connect_nodes(bl_material, socket, invert_node.inputs[1])
+        connect_nodes(bl_material, invert_node.outputs[0], bsdf_node.inputs["Specular"])
+
+    if "Mask" in descriptor_to_socket:
+        socket = descriptor_to_socket["Mask"][0]
+        connect_nodes(bl_material, socket, bsdf_node.inputs["Metallic"])
+
+    if "Normal" in descriptor_to_socket:
+        socket = descriptor_to_socket["Normal"]
+        output = None
+        if len(socket) == 2:
+            combine = create_node(bl_material, Nodes.ShaderNodeCombineRGB)
+            connect_nodes(bl_material, socket[0], combine.inputs[0])
+            connect_nodes(bl_material, socket[1], combine.inputs[1])
+            combine.inputs[2].default_value = 1
+            output = combine.outputs[0]
+        elif len(socket) == 1:
+            output = socket[0]
+        if output is not None:
+            normal_node = create_node(bl_material, Nodes.ShaderNodeNormalMap)
+            connect_nodes(bl_material, output, normal_node.inputs["Color"])
+            connect_nodes(bl_material, normal_node.outputs[0], bsdf_node.inputs["Normal"])
 
 
 def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
