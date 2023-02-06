@@ -55,11 +55,11 @@ class DMFComponentType(Enum):
 
 
 class DMFNodeType(Enum):
-    Node = "Node"
-    Model = "Model"
-    ModelGroup = "ModelGroup"
+    NODE = "NODE"
+    MODEL = "MODEL"
+    MODEL_GROUP = "MODEL_GROUP"
     LOD = "LOD"
-    Instance = "Instance"
+    INSTANCE = "INSTANCE"
 
 
 @runtime_checkable
@@ -276,15 +276,15 @@ class DMFNode(JsonSerializable):
         transform = DMFTransform.from_json(data["transform"]) if "transform" in data else None
         children = [cls.from_json(item) for item in data.get("children", [])]
 
-        if node_type == DMFNodeType.Model:
+        if node_type == DMFNodeType.MODEL:
             return DMFModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
                             DMFMesh.from_json(data["mesh"]), data.get("skeletonId", None))
-        elif node_type == DMFNodeType.ModelGroup:
+        elif node_type == DMFNodeType.MODEL_GROUP:
             return DMFModelGroup(node_type, name, collection_ids, transform, children, data.get("visible", True))
         elif node_type == DMFNodeType.LOD:
             return DMFLodModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
                                [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])])
-        elif node_type == DMFNodeType.Instance:
+        elif node_type == DMFNodeType.INSTANCE:
             return DMFInstance(node_type, name, collection_ids, transform, children, data.get("visible", True),
                                data["instanceId"])
         else:

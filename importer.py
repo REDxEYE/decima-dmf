@@ -528,13 +528,13 @@ def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.type
 def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
     if node is None:
         return None
-    if node.type == DMFNodeType.Model:
+    if node.type == DMFNodeType.MODEL:
         return import_dmf_model(cast(DMFModel, node), scene, parent_collection)
     elif node.type == DMFNodeType.LOD:
         return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection)
-    elif node.type == DMFNodeType.Instance:
+    elif node.type == DMFNodeType.INSTANCE:
         return import_dmf_instance(cast(DMFInstance, node), parent_collection)
-    elif node.type == DMFNodeType.ModelGroup:
+    elif node.type == DMFNodeType.MODEL_GROUP:
         model_group = cast(DMFModelGroup, node)
         if not model_group.children:
             return None
