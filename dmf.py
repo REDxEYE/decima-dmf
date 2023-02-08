@@ -1,10 +1,9 @@
 import zlib
 from base64 import b64decode
-from collections import defaultdict
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Protocol, runtime_checkable, Tuple, Optional, List
+from typing import Dict, Any, Protocol, Tuple, Optional, List
 
 import numpy as np
 
@@ -56,13 +55,13 @@ class DMFComponentType(Enum):
 
 class DMFNodeType(Enum):
     NODE = "NODE"
+    LOD = "LOD"
     MODEL = "MODEL"
     MODEL_GROUP = "MODEL_GROUP"
-    LOD = "LOD"
+    SKINNED_MODEL = "SKINNED_MODEL"
     INSTANCE = "INSTANCE"
 
 
-@runtime_checkable
 class JsonSerializable(Protocol):
 
     def to_json(self):
@@ -279,6 +278,9 @@ class DMFNode(JsonSerializable):
         if node_type == DMFNodeType.MODEL:
             return DMFModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
                             DMFMesh.from_json(data["mesh"]), data.get("skeletonId", None))
+        if node_type == DMFNodeType.SKINNED_MODEL:
+            return DMFSkinnedModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
+                                   data.get("skeletonId", None))
         elif node_type == DMFNodeType.MODEL_GROUP:
             return DMFModelGroup(node_type, name, collection_ids, transform, children, data.get("visible", True))
         elif node_type == DMFNodeType.LOD:
@@ -466,6 +468,11 @@ class DMFModelGroup(DMFNode):
 @dataclass(slots=True)
 class DMFModel(DMFNode):
     mesh: DMFMesh
+    skeleton_id: int
+
+
+@dataclass(slots=True)
+class DMFSkinnedModel(DMFNode):
     skeleton_id: int
 
 

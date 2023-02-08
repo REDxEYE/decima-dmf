@@ -14,7 +14,7 @@ from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFNodeType, DMFModelGroup, DMFLodModel,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
                   DMFSemantic, DMFComponentType, DMFInstance,
-                  VertexType, DMFBufferView, DMFTextureDescriptor)
+                  VertexType, DMFBufferView, DMFTextureDescriptor, DMFSkinnedModel)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -157,7 +157,10 @@ def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
 
 
 def _get_primitives_indices(primitive: DMFPrimitive, scene: DMFSceneFile):
-    buffer_data = _get_buffer_view_data(scene.buffer_views[primitive.index_buffer_view_id], scene)
+    buffer_view = scene.buffer_views[primitive.index_buffer_view_id]
+    if buffer_view.buffer_id == -1:
+        raise ValueError(f"Missing buffer for view {primitive.index_buffer_view_id}")
+    buffer_data = _get_buffer_view_data(buffer_view, scene)
     dtype = np.uint16 if primitive.index_size == 2 else np.uint32
     return np.frombuffer(buffer_data, dtype)[primitive.index_start:primitive.index_end].reshape((-1, 3))
 
@@ -410,22 +413,26 @@ def import_dmf_skeleton(skeleton: DMFSkeleton, name: str):
     return arm_obj
 
 
-def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
+                     parent_skeleton: Optional[bpy.types.Object]):
     LOGGER.debug(f"Loading \"{model.name}\" model")
-    if model.skeleton_id is not None:
+    if model.skeleton_id is not None and parent_skeleton is None:
         skeleton = import_dmf_skeleton(scene.skeletons[model.skeleton_id], model.name)
     else:
-        skeleton = None
+        skeleton = parent_skeleton
 
     primitives = _load_primitives(model, scene, skeleton)
 
     if skeleton is not None:
-        parent = skeleton
         for primitive in primitives:
             modifier = primitive.modifiers.new(type="ARMATURE", name="Armature")
             modifier.object = skeleton
+
+    if skeleton is not None and parent_skeleton is None:
+        parent = skeleton
     else:
         parent = bpy.data.objects.new(model.name + "_ROOT", None)
+        parent_collection.objects.link(parent)
 
     for primitive in primitives:
         primitive.parent = parent
@@ -442,7 +449,7 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bp
         # for collection_id in model.collection_ids:
         #     CONTEXT["collections"][collection_id].objects.link(grouper)
 
-        children = import_dmf_node(child, scene, parent_collection)
+        children = import_dmf_node(child, scene, parent_collection, parent_skeleton)
         if children is not None:
             children.parent = grouper
 
@@ -451,7 +458,7 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bp
         parent.rotation_mode = "QUATERNION"
         parent.rotation_quaternion = _convert_quat(model.transform.rotation)
         parent.scale = model.transform.scale
-    if skeleton is not None:
+    if skeleton is not None and skeleton != parent_skeleton:
         parent_collection.objects.link(skeleton)
         # for collection_id in model.collection_ids:
         #     CONTEXT["collections"][collection_id].objects.link(skeleton)
@@ -463,7 +470,8 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bp
     return parent
 
 
-def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
+                           parent_skeleton: Optional[bpy.types.Object]):
     LOGGER.debug(f"Loading \"{model_group.name}\" model group")
     group_collection = bpy.data.collections.new(model_group.name)
     parent_collection.children.link(group_collection)
@@ -476,7 +484,7 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, pare
         group_obj.scale = model_group.transform.scale
 
     for child in model_group.children:
-        obj = import_dmf_node(child, scene, group_collection)
+        obj = import_dmf_node(child, scene, group_collection, parent_skeleton)
         if obj:
             obj.parent = group_obj
     group_collection.objects.link(group_obj)
@@ -486,7 +494,8 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, pare
     return group_obj
 
 
-def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
+                   parent_skeleton: Optional[bpy.types.Object]):
     group_obj = bpy.data.objects.new(lod_model.name, None)
     parent_collection.objects.link(group_obj)
     if lod_model.transform:
@@ -495,18 +504,19 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
         group_obj.rotation_quaternion = _convert_quat(lod_model.transform.rotation)
         group_obj.scale = lod_model.transform.scale
     if lod_model.lods:
-        obj = import_dmf_node(lod_model.lods[0].model, scene, parent_collection)
+        obj = import_dmf_node(lod_model.lods[0].model, scene, parent_collection, parent_skeleton)
         if obj:
             obj.parent = group_obj
 
         for child in lod_model.children:
-            c_obj = import_dmf_node(child, scene, parent_collection)
+            c_obj = import_dmf_node(child, scene, parent_collection, parent_skeleton)
             if c_obj:
                 c_obj.parent = group_obj
     return group_obj
 
 
-def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.types.Collection):
+def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.types.Collection,
+                        parent_skeleton: Optional[bpy.types.Object]):
     obj = bpy.data.objects.new(instance_model.name, None)
     obj.empty_display_size = 4
 
@@ -525,20 +535,42 @@ def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.type
     return obj
 
 
-def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection):
+def import_dmf_skinned_model(skinned_model: DMFSkinnedModel, scene: DMFSceneFile,
+                             parent_collection: bpy.types.Collection,
+                             parent_skeleton: Optional[bpy.types.Object]):
+    group_collection = bpy.data.collections.new(skinned_model.name)
+    parent_collection.children.link(group_collection)
+    skeleton = import_dmf_skeleton(scene.skeletons[skinned_model.skeleton_id], skinned_model.name)
+    group_collection.objects.link(skeleton)
+
+    for child in skinned_model.children:
+        obj = import_dmf_node(child, scene, group_collection, skeleton)
+        if obj:
+            obj.parent = skeleton
+    return skeleton
+
+
+def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
+                    parent_skeleton: Optional[bpy.types.Object]):
     if node is None:
         return None
     if node.type == DMFNodeType.MODEL:
-        return import_dmf_model(cast(DMFModel, node), scene, parent_collection)
+        return import_dmf_model(cast(DMFModel, node), scene, parent_collection, parent_skeleton)
+    if node.type == DMFNodeType.SKINNED_MODEL:
+        return import_dmf_skinned_model(cast(DMFSkinnedModel, node), scene, parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.LOD:
-        return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection)
+        return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.INSTANCE:
-        return import_dmf_instance(cast(DMFInstance, node), parent_collection)
+        return import_dmf_instance(cast(DMFInstance, node), parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.MODEL_GROUP:
         model_group = cast(DMFModelGroup, node)
         if not model_group.children:
             return None
-        return import_dmf_model_group(model_group, scene, parent_collection)
+        return import_dmf_model_group(model_group, scene, parent_collection, parent_skeleton)
+    elif node.type == DMFNodeType.NODE:
+        if not node.children:
+            return None
+        return import_dmf_node(node, scene, parent_collection, parent_skeleton)
 
 
 def _collect_view_collections(parent):
@@ -582,7 +614,7 @@ def import_dmf(scene: DMFSceneFile):
             LOGGER.info(f"Load progress {i + 1}/{len(scene.instances)}")
         instance_collection = bpy.data.collections.new(node.name)
         instances_collection.children.link(instance_collection)
-        import_dmf_node(node, scene, instance_collection)
+        import_dmf_node(node, scene, instance_collection, None)
         CONTEXT["instances"][i] = instance_collection.name
 
     master_collection = bpy.data.collections.new("MASTER")
@@ -592,7 +624,7 @@ def import_dmf(scene: DMFSceneFile):
     for i, node in enumerate(scene.models):
         if i % 100 == 0:
             LOGGER.info(f"Load progress {i + 1}/{len(scene.models)}")
-        import_dmf_node(node, scene, master_collection)
+        import_dmf_node(node, scene, master_collection, None)
 
 
 def import_dmf_from_path(file: Path):
