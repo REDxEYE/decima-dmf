@@ -14,7 +14,7 @@ from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFNodeType, DMFModelGroup, DMFLodModel,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
                   DMFSemantic, DMFComponentType, DMFInstance,
-                  VertexType, DMFBufferView, DMFTextureDescriptor, DMFSkinnedModel)
+                  DMFBufferType, DMFBufferView, DMFTextureDescriptor, DMFSkinnedModel)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -125,7 +125,7 @@ def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
             dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype))
         dtype_metadata[attribute.semantic.name] = attribute.element_type.name
     dtype = np.dtype(dtype_fields, metadata=dtype_metadata)
-    if mode == VertexType.SINGLE_BUFFER:
+    if mode == DMFBufferType.SINGLE_BUFFER:
         data = np.zeros(primitive.vertex_count, dtype)
         buffer_groups = defaultdict(list)
         for attr in primitive.vertex_attributes.values():
