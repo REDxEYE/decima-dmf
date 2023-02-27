@@ -54,6 +54,7 @@ class DMFNodeType(Enum):
     MODEL_GROUP = "MODEL_GROUP"
     SKINNED_MODEL = "SKINNED_MODEL"
     INSTANCE = "INSTANCE"
+    ATTACHMENT = "ATTACHMENT"
 
 
 class JsonSerializable(Protocol):
@@ -282,6 +283,8 @@ class DMFNode(JsonSerializable):
                                [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])])
         elif node_type == DMFNodeType.INSTANCE:
             return DMFInstance(node_type, name, collection_ids, transform, children, visible, data["instanceId"])
+        elif node_type == DMFNodeType.ATTACHMENT:
+            return DMFAttachment(node_type, name, collection_ids, transform, children, visible, data["boneName"])
         else:
             return DMFNode(node_type, name, collection_ids, transform, children, visible)
 
@@ -467,6 +470,11 @@ class DMFModel(DMFNode):
 @dataclass(slots=True)
 class DMFSkinnedModel(DMFNode):
     skeleton_id: int
+
+
+@dataclass(slots=True)
+class DMFAttachment(DMFNode):
+    bone_name: str
 
 
 @dataclass(slots=True)
