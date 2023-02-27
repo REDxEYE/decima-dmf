@@ -6,13 +6,7 @@ from pathlib import Path
 from typing import Dict, Any, Protocol, Tuple, Optional, List
 
 import numpy as np
-
 import numpy.typing as npt
-
-
-class DMFDataType(Enum):
-    DDS = "DDS"
-    PNG = "PNG"
 
 
 class DMFSemantic(Enum):
@@ -36,15 +30,15 @@ class DMFSemantic(Enum):
 
 
 class DMFComponentType(Enum):
-    SIGNED_SHORT = "SignedShort", np.int16
-    UNSIGNED_SHORT = "UnsignedShort", np.uint16
-    SIGNED_SHORT_NORMALIZED = "SignedShortNormalized", np.int16
-    UNSIGNED_SHORT_NORMALIZED = "UnsignedShortNormalized", np.uint16
-    UNSIGNED_BYTE = "UnsignedByte", np.uint8
-    UNSIGNED_BYTE_NORMALIZED = "UnsignedByteNormalized", np.uint8
-    FLOAT = "Float", np.float32
-    HALF_FLOAT = "HalfFloat", np.float16
-    X10Y10Z10W2NORMALIZED = "X10Y10Z10W2Normalized", np.int32
+    SIGNED_SHORT = "SIGNED_SHORT", np.int16
+    UNSIGNED_SHORT = "UNSIGNED_SHORT", np.uint16
+    SIGNED_SHORT_NORMALIZED = "SIGNED_SHORT_NORMALIZED", np.int16
+    UNSIGNED_SHORT_NORMALIZED = "UNSIGNED_SHORT_NORMALIZED", np.uint16
+    UNSIGNED_BYTE = "UNSIGNED_BYTE", np.uint8
+    UNSIGNED_BYTE_NORMALIZED = "UNSIGNED_BYTE_NORMALIZED", np.uint8
+    FLOAT = "FLOAT", np.float32
+    HALF_FLOAT = "HALF_FLOAT", np.float16
+    X10Y10Z10W2NORMALIZED = "X10Y10Z10W2NORMALIZED", np.int32
 
     def __new__(cls, a, b):
         entry = object.__new__(cls)
@@ -112,7 +106,6 @@ class DMFTexture(JsonSerializable):
             "bufferId": self.buffer_id,
             "usageType": self.usage_type,
             "metadata": self.metadata
-
         }
 
     @classmethod
@@ -274,23 +267,23 @@ class DMFNode(JsonSerializable):
         collection_ids = list(set(data.get('collectionIds', [])))
         transform = DMFTransform.from_json(data["transform"]) if "transform" in data else None
         children = [cls.from_json(item) for item in data.get("children", [])]
+        visible = data.get("visible", True)
 
         if node_type == DMFNodeType.MODEL:
-            return DMFModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
+            return DMFModel(node_type, name, collection_ids, transform, children, visible,
                             DMFMesh.from_json(data["mesh"]), data.get("skeletonId", None))
         if node_type == DMFNodeType.SKINNED_MODEL:
-            return DMFSkinnedModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
+            return DMFSkinnedModel(node_type, name, collection_ids, transform, children, visible,
                                    data.get("skeletonId", None))
         elif node_type == DMFNodeType.MODEL_GROUP:
-            return DMFModelGroup(node_type, name, collection_ids, transform, children, data.get("visible", True))
+            return DMFModelGroup(node_type, name, collection_ids, transform, children, visible)
         elif node_type == DMFNodeType.LOD:
-            return DMFLodModel(node_type, name, collection_ids, transform, children, data.get("visible", True),
+            return DMFLodModel(node_type, name, collection_ids, transform, children, visible,
                                [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])])
         elif node_type == DMFNodeType.INSTANCE:
-            return DMFInstance(node_type, name, collection_ids, transform, children, data.get("visible", True),
-                               data["instanceId"])
+            return DMFInstance(node_type, name, collection_ids, transform, children, visible, data["instanceId"])
         else:
-            return DMFNode(node_type, name, collection_ids, transform, children, data.get("visible", True))
+            return DMFNode(node_type, name, collection_ids, transform, children, visible)
 
 
 @dataclass(slots=True)
@@ -381,7 +374,7 @@ class DMFVertexAttribute(JsonSerializable):
         return data
 
 
-class VertexType(Enum):
+class DMFBufferType(Enum):
     MULTI_BUFFER = "MULTI_BUFFER"
     SINGLE_BUFFER = "SINGLE_BUFFER"
 
@@ -393,7 +386,7 @@ class DMFPrimitive(JsonSerializable):
     vertex_start: int
     vertex_end: int
     vertex_attributes: Dict[DMFSemantic, DMFVertexAttribute]
-    vertex_type: VertexType
+    vertex_type: DMFBufferType
     index_count: int
     index_start: int
     index_end: int
@@ -429,7 +422,7 @@ class DMFPrimitive(JsonSerializable):
             data["vertexEnd"],
             {DMFSemantic(name): DMFVertexAttribute.from_json(item) for name, item in
              data.get("vertexAttributes", {}).items()},
-            VertexType(data["vertexType"]),
+            DMFBufferType(data["vertexType"]),
             data["indexCount"],
             data["indexStart"],
             data["indexEnd"],
