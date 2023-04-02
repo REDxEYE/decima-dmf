@@ -477,12 +477,12 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, pare
         obj = import_dmf_node(model_group.children[0], scene, group_collection, parent_skeleton)
         if obj:
             obj.parent = parent_skeleton
-
-            matrix = (Matrix.Translation(Vector(model_group.transform.position)) @
-                      Quaternion(_convert_quat(model_group.transform.rotation)).to_matrix().to_4x4() @
-                      Matrix.Diagonal(Vector(model_group.transform.scale)).to_4x4()
-                      )
-            obj.matrix_basis = matrix @ obj.matrix_basis
+            if model_group.transform is not None:
+                matrix = (Matrix.Translation(Vector(model_group.transform.position)) @
+                          Quaternion(_convert_quat(model_group.transform.rotation)).to_matrix().to_4x4() @
+                          Matrix.Diagonal(Vector(model_group.transform.scale)).to_4x4()
+                          )
+                obj.matrix_basis = matrix @ obj.matrix_basis
         return obj
 
     group_obj = bpy.data.objects.new(model_group.name, None)
