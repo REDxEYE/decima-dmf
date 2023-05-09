@@ -5,14 +5,14 @@
 #### Field Specification
 
 - `metadata` ([DMFSceneMetaData](#dmfscenemetadata)): The metadata of the scene.
-- `collections` (Array of [DMFCollection](#dmfcollection)): A list of collections present in the scene.
-- `models` (Array of [DMFNode](#dmfnode)): A list of models present in the scene.
-- `skeletons` (Array of [DMFSkeleton](#dmfskeleton)): A list of skeletons present in the scene.
-- `buffers` (Array of [DMFBuffer](#dmfbuffer)): A list of buffers containing raw binary data.
-- `bufferViews` (Array of [DMFBufferView](#dmfbufferview)): A list of views into the buffers.
-- `materials` (Array of [DMFMaterial](#dmfmaterial)): A list of materials used in the scene.
-- `textures` (Array of [DMFTexture](#dmftexture)): A list of textures used in the scene.
-- `instances` (Array of [DMFNode](#dmfnode)): A list of instances of models in the scene.
+- `collections` (Array of [DMFCollection](#dmfcollection)): An Array of collections present in the scene.
+- `models` (Array of [DMFNode](#dmfnode)): An Array of models present in the scene.
+- `skeletons` (Array of [DMFSkeleton](#dmfskeleton)): An Array of skeletons present in the scene.
+- `buffers` (Array of [DMFBuffer](#dmfbuffer)): An Array of buffers containing raw binary data.
+- `bufferViews` (Array of [DMFBufferView](#dmfbufferview)): An Array of views into the buffers.
+- `materials` (Array of [DMFMaterial](#dmfmaterial)): An Array of materials used in the scene.
+- `textures` (Array of [DMFTexture](#dmftexture)): An Array of textures used in the scene.
+- `instances` (Array of [DMFNode](#dmfnode)): An Array of instances of models in the scene.
 
 Please note that the data in this class will be used for future references as some other classes may reference data from its arrays. 
 
@@ -23,14 +23,14 @@ A `DMFSceneFile` object has the following structure:
 ```json
 {
     "metadata": DMFSceneMetaData,
-    "collections": Array[DMFCollection],
-    "models": Array[DMFNode],
-    "skeletons": Array[DMFSkeleton],
-    "buffers": Array[DMFBuffer],
-    "bufferViews": Array[DMFBufferView],
-    "materials": Array[DMFMaterial],
-    "textures": Array[DMFTexture],
-    "instances": Array[DMFNode]
+    "collections": [DMFCollection, ...],
+    "models": [DMFNode, ...],
+    "skeletons": [DMFSkeleton, ...],
+    "buffers": [DMFBuffer, ...],
+    "bufferViews": [DMFBufferView, ...],
+    "materials": [DMFMaterial, ...],
+    "textures": [DMFTexture, ...],
+    "instances": [DMFNode, ...]
 }
 ```
 #### JSON Example
@@ -42,14 +42,14 @@ Here's an example of a DMFSceneFile object:
         "generator": "Example Exporter (v1.0, abc123)",
         "version": 1
     },
-    "collections": [...],  // List of DMFCollection JSON objects
-    "models": [...],  // List of DMFNode JSON objects
-    "skeletons": [...],  // List of DMFSkeleton JSON objects
-    "buffers": [...],  // List of DMFBuffer JSON objects
-    "bufferViews": [...],  // List of DMFBufferView JSON objects
-    "materials": [...],  // List of DMFMaterial JSON objects
-    "textures": [...],  // List of DMFTexture JSON objects
-    "instances": [...]  // List of DMFNode JSON objects
+    "collections": [...],  // Array of DMFCollection JSON objects
+    "models": [...],  // Array of DMFNode JSON objects
+    "skeletons": [...],  // Array of DMFSkeleton JSON objects
+    "buffers": [...],  // Array of DMFBuffer JSON objects
+    "bufferViews": [...],  // Array of DMFBufferView JSON objects
+    "materials": [...],  // Array of DMFMaterial JSON objects
+    "textures": [...],  // Array of DMFTexture JSON objects
+    "instances": [...]  // Array of DMFNode JSON objects
 }
 ```
 
@@ -92,8 +92,8 @@ Here's an example of a `DMFSceneMetaData` object:
 #### Field Specification
 
 - `name` (String): The name of the collection.
-- `enabled` (Boolean, optional): Defines if the collection is enabled or not. By default, this field is set to `True`.
-- `parent` (Integer, optional): The index of the parent collection object within the `collections` array of the [DMFSceneFile](#dmfscenefile) class. If this field is not provided, it defaults to `None`, indicating that the collection has no parent.
+- `enabled` (Optional Boolean): Defines if the collection is enabled or not. By default, this field is set to `True`.
+- `parent` (Optional Integer): The index of the parent collection object within the `collections` array of the [DMFSceneFile](#dmfscenefile) class. If this field is not provided, it defaults to `None`, indicating that the collection has no parent.
 
 #### Structure
 
@@ -122,9 +122,9 @@ Here's an example of a `DMFCollection` object:
 
 #### Field Specification
 
-- `position` (Tuple of Floats): The position of the object in 3D space, represented as a tuple of three float values (x, y, z).
-- `scale` (Tuple of Floats): The scale of the object in 3D space, represented as a tuple of three float values (x, y, z).
-- `rotation` (Tuple of Floats): The rotation of the object in 3D space, represented as a tuple of four float values (x, y, z, w) for a quaternion.
+- `position` (Array of Floats): The position of the object in 3D space, represented as an array of three float values (x, y, z).
+- `scale` (Array of Floats): The scale of the object in 3D space, represented as an array of three float values (x, y, z).
+- `rotation` (Array of Floats): The rotation of the object in 3D space, represented as an array of four float values (x, y, z, w) for a quaternion.
 
 #### Structure
 
@@ -155,8 +155,8 @@ Here's an example of a `DMFTransform` object:
 
 - `name` (String): The name of the bone.
 - `transform` ([DMFTransform](#DMFTransform)): The transformation of the bone in the 3D space.
-- `parent_id` (Integer): The index of the parent bone in the skeleton's bone array. 
-- `local_space` (Boolean): Indicates whether the bone's transformation is in local space (relative to the parent bone) or in world space.
+- `parentId` (Integer): The index of the parent bone in the skeleton's bone array. 
+- `localSpace` (Boolean): Indicates whether the bone's transformation is in local space (relative to the parent bone) or in world space.
 
 #### Structure
 
@@ -176,11 +176,7 @@ Here's an example of a `DMFBone` object:
 ```json
 {
     "name": "Bone_1",
-    "transform": {
-        "position": [0.0, 0.0, 0.0],
-        "scale": [1.0, 1.0, 1.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0]
-    },
+    "transform": { ... },
     "parentId": 0,
     "localSpace": true
 }
@@ -238,7 +234,7 @@ And an example of an `DMFBuffer` object (external buffer):
 
 #### Field Specification
 
-- `buffer_id` (Integer): The index into the `buffers` array in the [DMFSceneFile](#dmfscenefile) object that this view references.
+- `bufferId` (Integer): The index into the `buffers` array in the [DMFSceneFile](#dmfscenefile) object that this view references.
 - `offset` (Integer): The offset in bytes from the start of the buffer.
 - `size` (Integer): The length of the buffer view in bytes.
 
@@ -272,8 +268,8 @@ In this example, the buffer view references the buffer at index 0 in the [DMFSce
 #### Field Specification
 
 - `name` (String): The name of the texture.
-- `buffer_id` (Integer): The index into the `buffers` array in the [DMFSceneFile](#dmfscenefile) object that this texture references.
-- `usage_type` (String): The usage type of the texture descriptor. This field is of type `DMFUsageType`.
+- `bufferId` (Integer): The index into the `buffers` array in the [DMFSceneFile](#dmfscenefile) object that this texture references.
+- `usageType` (String): The usage type of the texture descriptor. This field is of type `DMFUsageType`.
 - `metadata` (Dict): Additional metadata about the texture. The format of this field is not defined.
 
 #### Structure
@@ -285,7 +281,7 @@ A `DMFTexture` object has the following structure:
     "name": String,
     "bufferId": Integer,
     "usageType": Integer,
-    "metadata": Object
+    "metadata": Dictionary
 }
 ```
 
@@ -306,7 +302,7 @@ Here's an example of a `DMFTexture` object:
 In this example, the texture is named "Texture_1" and references the buffer at index 0 in the [DMFSceneFile](#dmfscenefile) object's `buffers` array. The metadata contains additional information about the texture, including its format, width, and height.
 
 ***Notes***: 
-* The usage_type field is a DMFUsageType string, which is a complex case not yet defined in version 1 of the format.
+* The usageType field is a DMFUsageType string, which is a complex case not yet defined in version 1 of the format.
 * The texture buffer must contain the texture in a general format, such as PNG, TGA, EXR, TIFF, and so on.
 
 ### DMFTextureDescriptor
@@ -315,9 +311,9 @@ In this example, the texture is named "Texture_1" and references the buffer at i
 
 #### Field Specification
 
-- `texture_id` (Integer): The index into the `textures` array in the [DMFSceneFile](#dmfscenefile) object that this texture descriptor references.
+- `textureId` (Integer): The index into the `textures` array in the [DMFSceneFile](#dmfscenefile) object that this texture descriptor references.
 - `channels` (String): The channels used by the texture. Valid values are "R", "G", "B", "A", "RG", "RGB", and "RGBA".
-- `usage_type` (String): The usage type of the texture descriptor. This field is of type `DMFUsageType`.
+- `usageType` (String): The usage type of the texture descriptor. This field is of type `DMFUsageType`.
 
 #### Structure
 
@@ -342,7 +338,7 @@ Here's an example of a `DMFTextureDescriptor` object:
 ```
 In this example, the texture descriptor references the texture at index 0 in the [DMFSceneFile](#dmfscenefile) object's `textures` array, and the texture has RGBA channels. The usage type is "Unknown", as it is not yet defined in the DMFUsageType enum.
 
-***Note***: The usage_type field is a DMFUsageType string, which is a complex case not yet defined in version 1 of the format.
+***Note***: The usageType field is a DMFUsageType string, which is a complex case not yet defined in version 1 of the format.
 
 ### DMFSkeleton
 
@@ -350,7 +346,7 @@ In this example, the texture descriptor references the texture at index 0 in the
 
 #### Field Specification
 
-- `bones` (List of [DMFBone](#dmfbone)): A list of bones that make up the skeleton.
+- `bones` (Array of [DMFBone](#dmfbone)): An Array of bones that make up the skeleton.
 - `transform` ([DMFTransform](#dmftransform), Optional): The transform of the skeleton.
 
 #### Structure
@@ -359,7 +355,7 @@ A `DMFSkeleton` object has the following structure:
 
 ```json
 {
-    "bones": [DMFBone, DMFBone, ...],
+    "bones": [DMFBone, ...],
     "transform": DMFTransform
 }
 ```
@@ -371,21 +367,13 @@ Here's an example of a `DMFSkeleton` object:
     "bones": [
         {
             "name": "Bone_1",
-            "transform": {
-                "position": [0.0, 0.0, 0.0],
-                "scale": [1.0, 1.0, 1.0],
-                "rotation": [0.0, 0.0, 0.0, 1.0]
-            },
+            "transform": { ... },
             "parentId": -1,
             "localSpace": true
         },
         {
             "name": "Bone_2",
-            "transform": {
-                "position": [0.0, 0.0, 0.0],
-                "scale": [1.0, 1.0, 1.0],
-                "rotation": [0.0, 0.0, 0.0, 1.0]
-            },
+            "transform": { ... },
             "parentId": 0,
             "localSpace": true
         }
@@ -408,8 +396,8 @@ In this example, the skeleton has two bones, named "Bone_1" and "Bone_2", respec
 
 - `name` (String): The name of the material.
 - `type` (String): The type of the material. This field has no particular format.
-- `texture_ids` (Dict): A dictionary that maps texture channel names to the index of the texture in the [DMFSceneFile](#dmfscenefile) object's `textures` array.
-- `texture_descriptors` (List): A list of `DMFTextureDescriptor` objects that provide additional information about the textures used by the material.
+- `textureIds` (Dict): A dictionary that maps texture channel names to the index of the texture in the [DMFSceneFile](#dmfscenefile) object's `textures` array.
+- `textureDescriptors` (List): An Array of `DMFTextureDescriptor` objects that provide additional information about the textures used by the material.
 
 #### Structure
 
@@ -481,9 +469,9 @@ In this example, the material is named "Material_1" and is of type "PBR". It use
 
 - `type` ([DMFNodeType](#dmfnodetype)): The type of the node.
 - `name` (Optional String): The name of the node.
-- `collection_ids` (List of Integer): The indices of the [collections](#dmfcollection) that this node belongs to.
+- `collectionIds` (Array of Integers): The indices of the [collections](#dmfcollection) that this node belongs to.
 - `transform` (Optional [DMFTransform](#dmftransform)): The transformation of the node.
-- `children` (List of [DMFNode](#dmfnode)): The child nodes of the current node.
+- `children` (Array of [DMFNode](#dmfnode)): The child nodes of the current node.
 - `visible` (Boolean): Whether the node is visible in the scene.
 
 #### Structure
@@ -494,9 +482,9 @@ A `DMFNode` object has the following structure:
 {
     "type": String,
     "name": Optional String,
-    "collectionIds": List of Integer,
+    "collectionIds": [Integer, ...],
     "transform": Optional DMFTransform,
-    "children": List of DMFNode,
+    "children": [DMFNodes, ...],
     "visible": Boolean
 }
 ```
@@ -538,25 +526,10 @@ In this example, the node has a type of `NODE`, a name of MyNode, belongs to the
 - `POSITION`: The vertex position.
 - `TANGENT`: The vertex tangent vector.
 - `NORMAL`: The vertex normal vector.
-- `COLOR_0`: The vertex color for the first color channel.
-- `COLOR_1`: The vertex color for the second color channel.
-- `COLOR_2`: The vertex color for the third color channel.
-- `COLOR_3`: The vertex color for the fourth color channel.
-- `TEXCOORD_0`: The first texture coordinate.
-- `TEXCOORD_1`: The second texture coordinate.
-- `TEXCOORD_2`: The third texture coordinate.
-- `TEXCOORD_3`: The fourth texture coordinate.
-- `TEXCOORD_4`: The fifth texture coordinate.
-- `TEXCOORD_5`: The sixth texture coordinate.
-- `TEXCOORD_6`: The seventh texture coordinate.
-- `JOINTS_0`: The first 4 joint indices for skinning.
-- `JOINTS_1`: The second 4 joint indices for skinning.
-- `JOINTS_2`: The third 4 joint indices for skinning.
-- `JOINTS_3`: The fourth 4 joint indices for skinning.
-- `WEIGHTS_0`: The weight for the first 4 joint indices for skinning.
-- `WEIGHTS_1`: The weight for the second 4 joint indices for skinning.
-- `WEIGHTS_2`: The weight for the third 4 joint indices for skinning.
-- `WEIGHTS_3`: The weight for the fourth 4 joint indices for skinning.
+- `COLOR_0` - `COLOR_3`: The vertex color.
+- `TEXCOORD_0` - `TEXCOORD_6`: The texture coordinate.
+- `JOINTS_0` - `JOINTS_3`: The 4 joint indices for skinning.
+- `WEIGHTS_0` - `WEIGHTS_3`: The weight for the 4 joint indices for skinning.
 
 #### Notes
 
@@ -569,12 +542,12 @@ In this example, the node has a type of `NODE`, a name of MyNode, belongs to the
 #### Field Specification
 
 - `semantic` (`DMFSemantic`): The semantic of the attribute.
-- `element_count` (Integer): The number of elements in the attribute.
-- `element_type` (`DMFComponentType`): The type of each element in the attribute.
+- `elementCount` (Integer): The number of elements in the attribute.
+- `elementType` (`DMFComponentType`): The type of each element in the attribute.
 - `size` (Integer): The size of the attribute in bytes.
 - `stride` (Optional Integer): The number of bytes between the start of consecutive attributes.
 - `offset` (Optional Integer): The offset in bytes of the first element of the attribute in the buffer.
-- `buffer_view_id` (Integer): The index into the `buffer_views` array in the `DMFSceneFile` object that this attribute references.
+- `bufferViewId` (Integer): The index into the `bufferViews` array in the `DMFSceneFile` object that this attribute references.
 
 #### Structure
 
@@ -606,7 +579,7 @@ Here's an example of a DMFVertexAttribute object:
 }
 ```
 
-In this example, the vertex attribute is of the "POSITION" semantic and contains 3 floats. Each float is 4 bytes, so the size field is 12 bytes. The attribute is stored in the `buffer` view at index 0 in the [DMFSceneFile](#dmfscenefile) object's `buffer_views` array, with an offset of 0 bytes and a stride of 24 bytes (which means that the next attribute starts 24 bytes after the start of this one).
+In this example, the vertex attribute is of the "POSITION" semantic and contains 3 floats. Each float is 4 bytes, so the size field is 12 bytes. The attribute is stored in the `buffer` view at index 0 in the [DMFSceneFile](#dmfscenefile) object's `bufferViews` array, with an offset of 0 bytes and a stride of 24 bytes (which means that the next attribute starts 24 bytes after the start of this one).
 
 ### DMFPrimitive
 
@@ -614,18 +587,18 @@ In this example, the vertex attribute is of the "POSITION" semantic and contains
 
 #### Field Specification
 
-- `grouping_id` (Integer): An identifier used when multiple primitives use the same vertex and index buffer. When each primitive uses its own buffer, each primitive must have a unique grouping ID (incremental).
-- `vertex_count` (Integer): The number of vertices in the primitive.
-- `vertex_start` (Integer): The index of the first vertex in the vertex buffer that belongs to this primitive.
-- `vertex_end` (Integer): The index of the last vertex in the vertex buffer that belongs to this primitive.
-- `vertex_attributes` (Dictionary): A dictionary of vertex attributes (DMFSemantic -> DMFVertexAttribute).
-- `vertex_type` (DMFBufferType): The data type of the vertex buffer.
-- `index_count` (Integer): The number of indices in the primitive.
-- `index_start` (Integer): The index of the first index in the index buffer that belongs to this primitive.
-- `index_end` (Integer): The index of the last index in the index buffer that belongs to this primitive.
-- `index_size` (Integer): The size of each index in bytes.
-- `index_buffer_view_id` (Integer): The index into the `bufferViews` array in the `DMFSceneFile` object that this primitive's index buffer view references.
-- `material_id` (Integer or null): The index into the `materials` array in the `DMFSceneFile` object that this primitive references, or null if it does not reference a material.
+- `groupingId` (Integer): An identifier used when multiple primitives use the same vertex and index buffer. When each primitive uses its own buffer, each primitive must have a unique grouping ID (incremental).
+- `vertexCount` (Integer): The number of vertices in the primitive.
+- `vertexStart` (Integer): The index of the first vertex in the vertex buffer that belongs to this primitive.
+- `vertexEnd` (Integer): The index of the last vertex in the vertex buffer that belongs to this primitive.
+- `vertexAttributes` (Dictionary): A dictionary of vertex attributes (DMFSemantic -> DMFVertexAttribute).
+- `vertexType` (DMFBufferType): The data type of the vertex buffer.
+- `indexCount` (Integer): The number of indices in the primitive.
+- `indexStart` (Integer): The index of the first index in the index buffer that belongs to this primitive.
+- `indexEnd` (Integer): The index of the last index in the index buffer that belongs to this primitive.
+- `indexSize` (Integer): The size of each index in bytes.
+- `indexBufferViewId` (Integer): The index into the `bufferViews` array in the [DMFSceneFile](#dmfscenefile) object that this primitive's index buffer view references.
+- `materialId` (Optional Integer): The index into the `materials` array in the [DMFSceneFile](#dmfscenefile) object that this primitive references, or null if it does not reference a material.
 
 #### Structure
 
@@ -637,14 +610,14 @@ A `DMFPrimitive` object has the following structure:
   "vertexCount": Integer,
   "vertexStart": Integer,
   "vertexEnd": Integer,
-  "vertexAttributes": Dictionary of "DMFSemantic" to "DMFVertexAttribute",
+  "vertexAttributes": Dictionary[DMFSemantic, DMFVertexAttribute],
   "vertexType": DMFBufferType,
   "indexCount": Integer,
   "indexStart": Integer,
   "indexEnd": Integer,
   "indexSize": Integer,
   "indexBufferViewId": Integer,
-  "materialId": Integer or null
+  "materialId": Optional Integer
 ```
 
 #### JSON Example
@@ -672,8 +645,8 @@ Here's an example of a DMFPrimitive object:
 
 #### Field Specification
 
-- `primitives` (List): A list of `DMFPrimitive` objects that define the geometry of the mesh.
-- `bone_remap_table` (Dictionary): A dictionary that maps local bone IDs to skeleton bone array.
+- `primitives` (List): An Array of `DMFPrimitive` objects that define the geometry of the mesh.
+- `boneRemapTable` (Dictionary[Integer, Integer]): A dictionary that maps local bone IDs to skeleton bone array.
 
 #### Structure
 
@@ -681,11 +654,7 @@ A `DMFMesh` object has the following structure:
 
 ```json
 {
-    "primitives": [
-        {...},
-        {...},
-        ...
-    ],
+    "primitives": [DMFPrimitive, ...],
     "boneRemapTable": {
         "0": 2,
         "1": 0,
@@ -716,7 +685,7 @@ Here's an example of a `DMFMesh` object:
     }
 }
 ```
-In this example, the mesh has a single primitive with indices stored in a buffer view at index 0 in the [DMFSceneFile](#dmfscenefile) object's `buffer_views` array, and attribute data stored in buffer views at indices 1, 2, and 3 in the `buffer_views` array. The `boneRemapTable` maps local bone IDs to the index of the bone in the [DMFSkeleton](#dmfskeleton) object's bones array.
+In this example, the mesh has a single primitive with indices stored in a buffer view at index 0 in the [DMFSceneFile](#dmfscenefile) object's `bufferViews` array, and attribute data stored in buffer views at indices 1, 2, and 3 in the `bufferViews` array. The `boneRemapTable` maps local bone IDs to the index of the bone in the [DMFSkeleton](#dmfskeleton) object's bones array.
 
 ### DMFModel
 
@@ -726,7 +695,7 @@ In this example, the mesh has a single primitive with indices stored in a buffer
 
 - Fields that are inherited from [DMFNode](#dmfnode)
 - `mesh` (`DMFMesh`): The mesh of the model.
-- `skeleton_id` (Integer): The index of the skeleton in the [DMFSceneFile](#dmfscenefile) object's `skeletons` array that is used to animate the model. If the model is not skinned, this field is set to -1.
+- `skeletonId` (Integer): The index of the skeleton in the [DMFSceneFile](#dmfscenefile) object's `skeletons` array that is used to animate the model. If the model is not skinned, this field is set to -1.
 #### Structure
 
 A `DMFModel` object has the following structure:
@@ -734,10 +703,11 @@ A `DMFModel` object has the following structure:
 ```json
 {
   "mesh": DMFMesh,
+  "skeletonId": Integer,
   "type": "MODEL",
   "name": String,
-  "children": List of DMFNode,
-  "collectionIds": List of Integers,
+  "children": [DMFNode, ...],
+  "collectionIds": [Integers, ...],
   "transform": DMFTransfrom
 }
 ```
@@ -773,7 +743,7 @@ A `DMFModelGroup` object has the same structure as a [DMFNode](#dmfnode) object.
 #### Field Specification
 
 - Fields that are inherited from [DMFNode](#dmfnode)
-- `bone_name` (String): The name of the bone in the parent skeleton that this attachment is attached to.
+- `boneName` (String): The name of the bone in the parent skeleton that this attachment is attached to.
 
 #### Structure
 
@@ -783,10 +753,10 @@ A `DMFAttachment` object has the following structure:
 {
   "type": "ATTACHMENT",
   "name": String,
-  "children": List of DMFNode,
-  "collectionIds": List of Integers,
+  "children": [DMFNode, ...],
+  "collectionIds": [Integer, ...],
   "transform": DMFTransfrom
-  "bone_name": String
+  "boneName": String
 }
 ```
 
@@ -797,19 +767,19 @@ A `DMFAttachment` object has the following structure:
 #### Field Specification
 
 - Fields that are inherited from [DMFNode](#dmfnode)
-- `instance_id` (Integer): The index into the `instances` array in the [DMFSceneFile](#dmfscenefile) object.
+- `instanceId` (Integer): The index into the `instances` array in the [DMFSceneFile](#dmfscenefile) object.
 
 #### Structure
 
-A `DMFInstance` object has the same structure as a [DMFNode](#dmfnode) object, with the addition of the `instance_id` field:
+A `DMFInstance` object has the same structure as a [DMFNode](#dmfnode) object, with the addition of the `instanceId` field:
 
 ```json
 {
   "type": "INSTANCE",
   "name": String,
-  "children": List of DMFNode,
-  "collectionIds": List of Integers,
+  "children": [DMFNode, ...],
+  "collectionIds": [Integer, ...],
   "transform": DMFTransfrom,
-  "instance_id": Integer
+  "instanceId": Integer
 }
 ```
