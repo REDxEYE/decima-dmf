@@ -14,6 +14,9 @@ class DMFSemantic(Enum):
     TANGENT = "TANGENT"
     NORMAL = "NORMAL"
     COLOR_0 = "COLOR_0"
+    COLOR_1 = "COLOR_1"
+    COLOR_2 = "COLOR_2"
+    COLOR_3 = "COLOR_3"
     TEXCOORD_0 = "TEXCOORD_0"
     TEXCOORD_1 = "TEXCOORD_1"
     TEXCOORD_2 = "TEXCOORD_2"
@@ -24,9 +27,11 @@ class DMFSemantic(Enum):
     JOINTS_0 = "JOINTS_0"
     JOINTS_1 = "JOINTS_1"
     JOINTS_2 = "JOINTS_2"
+    JOINTS_3 = "JOINTS_3"
     WEIGHTS_0 = "WEIGHTS_0"
     WEIGHTS_1 = "WEIGHTS_1"
     WEIGHTS_2 = "WEIGHTS_2"
+    WEIGHTS_3 = "WEIGHTS_3"
 
 
 class DMFComponentType(Enum):
@@ -371,6 +376,14 @@ class DMFVertexAttribute(JsonSerializable):
             data["bufferViewId"]
         )
 
+    @classmethod
+    def supported(cls, data: Dict[str, Any]):
+        semantic = data["semantic"]
+        supported_semantic = semantic in [item.name for item in list(DMFSemantic)]
+        element_type = data["elementType"]
+        supported_element_type = element_type in [item.name for item in list(DMFComponentType)]
+        return supported_semantic and supported_element_type
+
     def convert(self, scene) -> npt.NDArray:
         buffer = scene.buffers_views[self.buffer_view_id].get_data(scene)[self.offset:]
         data = np.frombuffer(buffer, self.element_type.dtype).reshape((-1, self.element_count))
@@ -424,7 +437,7 @@ class DMFPrimitive(JsonSerializable):
             data["vertexStart"],
             data["vertexEnd"],
             {DMFSemantic(name): DMFVertexAttribute.from_json(item) for name, item in
-             data.get("vertexAttributes", {}).items()},
+             data.get("vertexAttributes", {}).items() if DMFVertexAttribute.supported(item)},
             DMFBufferType(data["vertexType"]),
             data["indexCount"],
             data["indexStart"],
