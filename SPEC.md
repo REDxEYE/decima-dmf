@@ -397,7 +397,7 @@ In this example, the skeleton has two bones, named "Bone_1" and "Bone_2", respec
 - `name` (String): The name of the material.
 - `type` (String): The type of the material. This field has no particular format.
 - `textureIds` (Dict): A dictionary that maps texture channel names to the index of the texture in the [DMFSceneFile](#dmfscenefile) object's `textures` array.
-- `textureDescriptors` (List): An Array of `DMFTextureDescriptor` objects that provide additional information about the textures used by the material.
+- `textureDescriptors` (Array): An Array of `DMFTextureDescriptor` objects that provide additional information about the textures used by the material.
 
 #### Structure
 
@@ -645,7 +645,7 @@ Here's an example of a DMFPrimitive object:
 
 #### Field Specification
 
-- `primitives` (List): An Array of `DMFPrimitive` objects that define the geometry of the mesh.
+- `primitives` (Array): An Array of `DMFPrimitive` objects that define the geometry of the mesh.
 - `boneRemapTable` (Dictionary[Integer, Integer]): A dictionary that maps local bone IDs to skeleton bone array.
 
 #### Structure
