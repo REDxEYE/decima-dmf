@@ -197,7 +197,7 @@ Here's an example of a `DMFBone` object:
 - `name` (String): The name of the buffer.
 - `size` (Integer): The original size of the buffer.
 - `path` (Optional String): The relative path to the buffer if it is external.
-- `data` (Optional String): The internal data of the buffer if it is internal. This data is compressed using zlib deflate.
+- `data` (Optional String): The internal data of the buffer if it is internal. This data is compressed using zlib deflate and base64 encoded.
 
 **Note:** A buffer can be either internal or external. If the `data` field is provided, the buffer is considered internal. If the `path` field is provided, the buffer is considered external. Providing both `path` and `data` is illegal and will yield undefined behaviour.
 
@@ -316,7 +316,7 @@ In this example, the texture is named "Texture_1" and references the buffer at i
 #### Field Specification
 
 - `texture_id` (Integer): The index into the `textures` array in the [DMFSceneFile](#dmfscenefile) object that this texture descriptor references.
-- `channels` (String): The channels used by the texture. Valid values are "R", "RG", "RGB", and "RGBA".
+- `channels` (String): The channels used by the texture. Valid values are "R", "G", "B", "A", "RG", "RGB", and "RGBA".
 - `usage_type` (String): The usage type of the texture descriptor. This field is of type `DMFUsageType`.
 
 #### Structure
