@@ -213,21 +213,18 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         vertex_indices = np.zeros((len(mesh_data.loops, )), dtype=np.uint32)
         mesh_data.loops.foreach_get('vertex_index', vertex_indices)
         t_vertex_data = vertex_data[vertex_indices]
+
         for uv_layer_id in range(7):
             semantic = DMFSemantic(f"TEXCOORD_{uv_layer_id}")
-            uv_layer_name = f"UV{uv_layer_id}"
             if primitive_0.has_attribute(semantic):
-                _add_uv(mesh_data, uv_layer_name, _convert_type_and_size(semantic, t_vertex_data, np.float32))
+                _add_uv(mesh_data, f"UV{uv_layer_id}", _convert_type_and_size(semantic, t_vertex_data, np.float32))
 
-        if primitive_0.has_attribute(DMFSemantic.COLOR_0):
-            vertex_colors = mesh_data.vertex_colors.new(name="COLOR")
-            vertex_colors_data = vertex_colors.data
-            color_data = _convert_type_and_size(DMFSemantic.COLOR_0, t_vertex_data, np.float32)
-            vertex_colors_data.foreach_set('color', color_data.flatten())
+        for i in range(4):
+            _add_color(DMFSemantic(f"COLOR_{i}"), mesh_data, primitive_0, t_vertex_data)
 
-        mesh_data.polygons.foreach_set("use_smooth", np.ones(len(mesh_data.polygons), np.uint32))
-        mesh_data.use_auto_smooth = True
         if primitive_0.has_attribute(DMFSemantic.NORMAL):
+            mesh_data.polygons.foreach_set("use_smooth", np.ones(len(mesh_data.polygons), np.uint32))
+            mesh_data.use_auto_smooth = True
             normal_data = _convert_type_and_size(DMFSemantic.NORMAL, vertex_data, np.float32, element_end=3)
             mesh_data.normals_split_custom_set_from_vertices(normal_data)
 
@@ -240,17 +237,25 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
     return primitives
 
 
+def _add_color(semantic: DMFSemantic, mesh_data: bpy.types.Mesh, primitive: DMFPrimitive, t_vertex_data):
+    if primitive.has_attribute(semantic):
+        vertex_colors = mesh_data.vertex_colors.new(name=semantic.name)
+        vertex_colors_data = vertex_colors.data
+        color_data = _convert_type_and_size(semantic, t_vertex_data, np.float32)
+        vertex_colors_data.foreach_set("color", color_data.flatten())
+
+
 def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMesh,
                   primitive_0: DMFPrimitive, vertex_data: npt.NDArray):
     weight_groups = [mesh_obj.vertex_groups.new(name=bone.name) for bone in skeleton.bones]
     elem_count = 0
-    for j in range(3):
+    for j in range(4):
         if DMFSemantic(f"JOINTS_{j}") not in primitive_0.vertex_attributes:
             break
         elem_count += 1
     blend_weights = np.zeros((primitive_0.vertex_count, elem_count * 4), np.float32)
     blend_indices = np.zeros((primitive_0.vertex_count, elem_count * 4), np.int32)
-    for j in range(3):
+    for j in range(4):
         if DMFSemantic(f"JOINTS_{j}") not in primitive_0.vertex_attributes:
             continue
         blend_indices[:, 4 * j:4 * (j + 1)] = vertex_data[f"JOINTS_{j}"].copy()
@@ -262,13 +267,15 @@ def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMe
     np_remap_table = np.full(max(mesh.bone_remap_table.keys()) + 1, -1, np.int32)
     np_remap_table[list(mesh.bone_remap_table.keys())] = list(mesh.bone_remap_table.values())
     remapped_indices = np_remap_table[blend_indices]
-
-    for n, (bone_indices, bone_weights) in enumerate(zip(remapped_indices, blend_weights)):
-        total = bone_weights.sum()
-        weight_groups[bone_indices[0]].add([n], 1 - total, "ADD")
-        if total > 0.0:
+    totals = blend_weights.sum(axis=1)
+    zeroth_weights = 1 - totals
+    not_ones = zeroth_weights < 1.0
+    for n, bone_indices in enumerate(remapped_indices):
+        weight_groups[bone_indices[0]].add([n], zeroth_weights[n], "ADD")
+        if not_ones[n]:
+            weights = blend_weights[n]
             for i, bone_index in enumerate(bone_indices[1:]):
-                weight_groups[bone_index].add([n], bone_weights[i], "ADD")
+                weight_groups[bone_index].add([n], weights[i], "ADD")
 
 
 def _add_uv(mesh_data: bpy.types.Mesh, uv_name: str, uv_data: npt.NDArray[float]):
@@ -599,7 +606,6 @@ def import_dmf_attachment(attachment_model: DMFAttachment, scene: DMFSceneFile,
 
 def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                     parent_skeleton: Optional[bpy.types.Object]):
-    print(type(node))
     if node is None:
         return None
     if node.type == DMFNodeType.MODEL:
