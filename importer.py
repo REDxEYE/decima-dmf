@@ -15,7 +15,7 @@ from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
                   DMFSemantic, DMFComponentType, DMFInstance,
                   DMFBufferType, DMFBufferView, DMFTextureDescriptor,
-                  DMFSkinnedModel, DMFAttachment)
+                  DMFSkinnedModel, DMFAttachment, DMFVertexAttribute)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -128,21 +128,35 @@ def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
     dtype = np.dtype(dtype_fields, metadata=dtype_metadata)
     if mode == DMFBufferType.SINGLE_BUFFER:
         data = np.zeros(primitive.vertex_count, dtype)
-        buffer_groups = defaultdict(list)
+        buffer_groups: Dict[int, List[DMFVertexAttribute]] = defaultdict(list)
         for attr in primitive.vertex_attributes.values():
             buffer_groups[attr.buffer_view_id].append(attr)
-
         for buffer_view_id, attributes in buffer_groups.items():
+            total_offset = 0
+            holes = {}
             stream_dtype_fields = []
             stream_dtype_metadata: Dict[str, str] = {}
-            sorted_attributes = sorted(attributes, key=lambda a: a.offset)
+            sorted_attributes: List[DMFVertexAttribute] = sorted(attributes, key=lambda a: a.offset)
             for attribute in sorted_attributes:
+                if total_offset != attribute.offset:
+                    hole_name = f"HOLE_{total_offset}"
+                    hole_size = attribute.offset - total_offset
+                    total_offset += hole_size
+                    stream_dtype_fields.append((hole_name, np.uint8, hole_size))
+                    stream_dtype_metadata[hole_name] = hole_name
+                holes[attribute.offset] = attribute.size
+                total_offset += attribute.size
                 if attribute.element_count > 1:
                     stream_dtype_fields.append(
                         (attribute.semantic.name, attribute.element_type.dtype, attribute.element_count))
                 else:
                     stream_dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype))
                 stream_dtype_metadata[attribute.semantic.name] = attribute.element_type.name
+
+            last_attribute = sorted_attributes[-1]
+            if total_offset != last_attribute.stride:
+                stream_dtype_fields.append(("TAIL_FILLER", np.uint8, last_attribute.stride - total_offset))
+                stream_dtype_metadata["TAIL_FILLER"] = "TAIL_FILLER"
             stream_dtype = np.dtype(stream_dtype_fields, metadata=dtype_metadata)
 
             buffer_data = _get_buffer_view_data(scene.buffer_views[buffer_view_id], scene)
