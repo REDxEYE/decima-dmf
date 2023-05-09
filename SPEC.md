@@ -797,7 +797,7 @@ A `DMFAttachment` object has the following structure:
 #### Field Specification
 
 - Fields that are inherited from [DMFNode](#dmfnode)
-- `instance_id` (Integer): The index into the `instances` array in the `DMFSceneFile` object.
+- `instance_id` (Integer): The index into the `instances` array in the [DMFSceneFile](#dmfscenefile) object.
 
 #### Structure
 
