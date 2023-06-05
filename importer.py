@@ -3,8 +3,9 @@ import logging
 from collections import defaultdict
 from itertools import groupby
 from pathlib import Path
-from typing import cast, Optional, Dict, List
+from typing import cast, Optional, Dict, List, Tuple
 
+import bmesh
 import bpy
 import numpy as np
 import numpy.typing as npt
@@ -32,7 +33,7 @@ LOGGER = get_logger("DMF::Loader")
 CONTEXT = {'collections': [], "instances": {}}
 
 
-def _convert_quat(quat):
+def _convert_quat(quat: Tuple[float, float, float, float]):
     return quat[3], quat[0], quat[1], quat[2]
 
 
@@ -270,6 +271,7 @@ def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMe
     totals = blend_weights.sum(axis=1)
     zeroth_weights = 1 - totals
     not_ones = zeroth_weights < 1.0
+
     for n, bone_indices in enumerate(remapped_indices):
         weight_groups[bone_indices[0]].add([n], zeroth_weights[n], "ADD")
         if not_ones[n]:
@@ -548,12 +550,13 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
 def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.types.Collection,
                         parent_skeleton: Optional[bpy.types.Object]):
     obj = bpy.data.objects.new(instance_model.name, None)
-    obj.empty_display_size = 4
+    obj.empty_display_size = 1
 
     if instance_model.instance_id != -1:
         instance_name = CONTEXT["instances"][instance_model.instance_id]
+        name_ = bpy.data.collections[instance_name]
         obj.instance_type = 'COLLECTION'
-        obj.instance_collection = bpy.data.collections[instance_name]
+        obj.instance_collection = name_
 
     if instance_model.transform:
         obj.location = instance_model.transform.position
@@ -661,7 +664,7 @@ def import_dmf(scene: DMFSceneFile):
     #         if layer_collection.collection.name == collection.name:
     #             layer_collection.exclude = not collection_desc.enabled
 
-    instances_collection = bpy.data.collections.new("INSTANCES")
+    instances_collection = bpy.data.collections.new("MASTER")
     bpy.context.scene.collection.children.link(instances_collection)
 
     for layer_collection in _collect_view_collections(bpy.context.scene.view_layers[0].layer_collection):
@@ -677,7 +680,7 @@ def import_dmf(scene: DMFSceneFile):
         import_dmf_node(node, scene, instance_collection, None)
         CONTEXT["instances"][i] = instance_collection.name
 
-    master_collection = bpy.data.collections.new("MASTER")
+    master_collection = bpy.data.collections.new("INSTANCES")
     bpy.context.scene.collection.children.link(master_collection)
 
     LOGGER.info(f"Loading {len(scene.models)} Objects")
