@@ -20,8 +20,9 @@ class DMF_OT_DMFImport(bpy.types.Operator):
             directory = Path(self.filepath).parent.absolute()
         else:
             directory = Path(self.filepath).absolute()
-        file = directory / self.filepath
-        import_dmf_from_path(file)
+        for file in self.files:
+            file = directory / file.name
+            import_dmf_from_path(file)
 
         return {'FINISHED'}
 
