@@ -199,7 +199,7 @@ class DMFBuffer(JsonSerializable):
             data = zlib.decompress(b64decode(self.data))
         else:
             raise ValueError("Data/Path are missing")
-        assert len(data) == self.size
+        assert len(data) == self.size, f"Buffer {self.name} has wrong size. Expected {self.size}, got {len(data)}"
         return data
 
 
