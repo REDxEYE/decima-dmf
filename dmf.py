@@ -280,22 +280,23 @@ class DMFNode(JsonSerializable):
         visible = data.get("visible", True)
 
         if node_type == DMFNodeType.MODEL:
-            return DMFModel(node_type, name, collection_ids, transform, children, visible,
-                            DMFMesh.from_json(data["mesh"]), data.get("skeletonId", None))
+            skeleton_id = data.get("skeletonId", None)
+            mesh = DMFMesh.from_json(data["mesh"])
+            return DMFModel(node_type, name, collection_ids, transform, children, visible, mesh, skeleton_id)
         if node_type == DMFNodeType.SKINNED_MODEL:
-            return DMFSkinnedModel(node_type, name, collection_ids, transform, children, visible,
-                                   data.get("skeletonId", None))
-        elif node_type == DMFNodeType.MODEL_GROUP:
+            skeleton_id = data.get("skeletonId", None)
+            return DMFSkinnedModel(node_type, name, collection_ids, transform, children, visible, skeleton_id)
+        if node_type == DMFNodeType.MODEL_GROUP:
             return DMFModelGroup(node_type, name, collection_ids, transform, children, visible)
-        elif node_type == DMFNodeType.LOD:
-            return DMFLodModel(node_type, name, collection_ids, transform, children, visible,
-                               [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])])
-        elif node_type == DMFNodeType.INSTANCE:
+        if node_type == DMFNodeType.LOD:
+            lods = [DMFLod.from_json(lod_data) for lod_data in data.get("lods", [])]
+            return DMFLodModel(node_type, name, collection_ids, transform, children, visible, lods)
+        if node_type == DMFNodeType.INSTANCE:
             return DMFInstance(node_type, name, collection_ids, transform, children, visible, data["instanceId"])
-        elif node_type == DMFNodeType.ATTACHMENT:
+        if node_type == DMFNodeType.ATTACHMENT:
             return DMFAttachment(node_type, name, collection_ids, transform, children, visible, data["boneName"])
-        else:
-            return DMFNode(node_type, name, collection_ids, transform, children, visible)
+
+        return DMFNode(node_type, name, collection_ids, transform, children, visible)
 
 
 @dataclass(slots=True)
