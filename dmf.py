@@ -148,7 +148,7 @@ class DMFTransform(JsonSerializable):
 
     @classmethod
     def identity(cls):
-        return cls((0, 0, 0), (0, 0, 0), (0, 0, 0, 0))
+        return cls((0, 0, 0), (1, 1, 1), (0, 0, 0, 0))
 
 
 @dataclass(slots=True)
