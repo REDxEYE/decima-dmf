@@ -170,7 +170,7 @@ class DMFBone(JsonSerializable):
     def from_json(cls, data: Dict[str, Any]):
         return cls(
             data["name"],
-            DMFTransform.from_json(data["transform"]),
+            DMFTransform.from_json(data["transform"]) if "transform" in data else DMFTransform.identity(),
             data["parentId"],
             data.get("localSpace", False)
         )
@@ -231,7 +231,7 @@ class DMFSkeleton(JsonSerializable):
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]):
-        transform = DMFTransform.from_json(data["transform"]) if "transform" in data else None
+        transform = DMFTransform.from_json(data["transform"]) if "transform" in data else DMFTransform.identity()
         return cls([DMFBone.from_json(item) for item in data.get("bones", [])], transform)
 
 
