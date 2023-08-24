@@ -146,6 +146,10 @@ class DMFTransform(JsonSerializable):
     def from_json(cls, data: Dict[str, Any]):
         return cls(**data)
 
+    @classmethod
+    def identity(cls):
+        return cls((0, 0, 0), (0, 0, 0), (0, 0, 0, 0))
+
 
 @dataclass(slots=True)
 class DMFBone(JsonSerializable):
@@ -271,7 +275,7 @@ class DMFNode(JsonSerializable):
         node_type = DMFNodeType(data["type"])
         name = data.get("name", node_type.name)
         collection_ids = list(set(data.get('collectionIds', [])))
-        transform = DMFTransform.from_json(data["transform"]) if "transform" in data else None
+        transform = DMFTransform.from_json(data["transform"]) if "transform" in data else DMFTransform.identity()
         children = [cls.from_json(item) for item in data.get("children", [])]
         visible = data.get("visible", True)
 
