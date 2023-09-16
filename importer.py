@@ -259,7 +259,8 @@ def _add_skinning(skeleton: DMFSkeleton, mesh_obj: bpy.types.Object, mesh: DMFMe
     for j in range(4):
         if DMFSemantic(f"JOINTS_{j}") not in primitive_0.vertex_attributes:
             continue
-        blend_indices[:, 4 * j:4 * (j + 1)] = vertex_data[f"JOINTS_{j}"].copy()
+        max_size = vertex_data[f"JOINTS_{j}"].shape[1]
+        blend_indices[:, 4 * j:4 * (j + 1)][:, :max_size] = vertex_data[f"JOINTS_{j}"].copy()
         weight_semantic = DMFSemantic(f"WEIGHTS_{j}")
         if primitive_0.has_attribute(weight_semantic):
             weight_data = _convert_type_and_size(weight_semantic, vertex_data, np.float32)
