@@ -16,7 +16,7 @@ from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
                   DMFSemantic, DMFComponentType, DMFInstance,
                   DMFBufferType, DMFBufferView, DMFTextureDescriptor,
-                  DMFSkinnedModel, DMFAttachment, DMFVertexAttribute)
+                  DMFSkinnedModel, DMFAttachment, DMFVertexAttribute, DMFMapTile)
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
@@ -90,9 +90,9 @@ def _convert_type_and_size(semantic: DMFSemantic, input_dtype_array: npt.NDArray
     return _convert(input_array)[:, element_start:element_end]
 
 
-def _load_texture(scene: DMFSceneFile, texture_id: int):
+def _load_texture(scene: DMFSceneFile, texture_id: int, force_load: bool = False):
     texture = scene.textures[texture_id]
-    if bpy.data.images.get(texture.name, None) is not None:
+    if bpy.data.images.get(texture.name, None) is not None and not force_load:
         return
     buffer = scene.buffers[texture.buffer_id]
     image = bpy.data.images.new(texture.name, width=1, height=1)
@@ -100,6 +100,7 @@ def _load_texture(scene: DMFSceneFile, texture_id: int):
     image.source = 'FILE'
     image.use_fake_user = True
     image.alpha_mode = 'CHANNEL_PACKED'
+    return image
 
 
 def _get_texture(scene, texture_id):
@@ -561,12 +562,16 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
     return group_obj
 
 
-def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.types.Collection,
+def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                         parent_skeleton: Optional[bpy.types.Object]):
     obj = bpy.data.objects.new(instance_model.name, None)
     obj.empty_display_size = 1
 
     if instance_model.instance_id != -1:
+        if isinstance(scene.instances[instance_model.instance_id],
+                      DMFInstance) and instance_model.transform.is_identity:
+            return import_dmf_instance(cast(DMFInstance, scene.instances[instance_model.instance_id]),
+                                       scene, parent_collection, parent_skeleton)
         instance_name = CONTEXT["instances"][instance_model.instance_id]
         name_ = bpy.data.collections[instance_name]
         obj.instance_type = 'COLLECTION'
@@ -579,6 +584,10 @@ def import_dmf_instance(instance_model: DMFInstance, parent_collection: bpy.type
         obj.scale = instance_model.transform.scale
 
     parent_collection.objects.link(obj)
+    for child in instance_model.children:
+        c_obj = import_dmf_node(child, scene, parent_collection, parent_skeleton)
+        c_obj.parent = obj
+
     return obj
 
 
@@ -621,6 +630,98 @@ def import_dmf_attachment(attachment_model: DMFAttachment, scene: DMFSceneFile,
     return parent_skeleton
 
 
+def _generate_grid(grid_size):
+    vertices = []
+    uvs = []
+    dx = 1.0 / grid_size
+    dy = 1.0 / grid_size
+
+    for i in range(grid_size + 1):
+        for j in range(grid_size + 1):
+            x = i / grid_size
+            z = j / grid_size
+            u = i * dx
+            v = j * dy
+
+            vertices.append((x, z, 0))
+            uvs.append((u, v))
+
+    return vertices, uvs
+
+
+def _generate_indices(grid_size):
+    indices = []
+    for i in range(grid_size):
+        for j in range(grid_size):
+            top_left = i * (grid_size + 1) + j
+            top_right = top_left + 1
+            bottom_left = top_left + grid_size + 1
+            bottom_right = bottom_left + 1
+
+            indices.append((top_left, bottom_left, bottom_right, top_right))
+    return indices
+
+
+def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
+                        parent_collection: bpy.types.Collection,
+                        parent_skeleton: Optional[bpy.types.Object]):
+    if "worlddata_height_terrain" not in map_tile.textures:
+        print("No \"worlddata_height_terrain\" in textures")
+        return
+
+    tile_name = f"TILE_{map_tile.grid_coordinate[0]}_{map_tile.grid_coordinate[1]}"
+
+    mesh_data = bpy.data.meshes.new(tile_name + f"_MESH")
+    mesh_obj = bpy.data.objects.new(tile_name, mesh_data)
+    vertices, uvs = _generate_grid(512)
+    indices = _generate_indices(512)
+    vertices = np.asarray(vertices, np.float32)
+    uvs = np.asarray(uvs, np.float32)
+
+    dims = np.asarray(map_tile.bbox_max) - np.asarray(map_tile.bbox_min)
+    vertices *= dims
+    vertices += np.asarray(map_tile.bbox_min) * (1, 1, 0)
+
+    mesh_data.from_pydata(vertices, [], indices)
+    mesh_data.update(calc_edges=True, calc_edges_loose=True)
+
+    vertex_indices = np.zeros((len(mesh_data.loops, )), dtype=np.uint32)
+    mesh_data.loops.foreach_get('vertex_index', vertex_indices)
+    _add_uv(mesh_data, "UV", uvs[vertex_indices])
+    mesh_data.polygons.foreach_set("use_smooth", np.ones(len(mesh_data.polygons), np.uint32))
+
+    bl_material = create_material(tile_name, mesh_obj)
+
+    bl_material.use_nodes = True
+    clear_nodes(bl_material)
+    output_node = create_node(bl_material, Nodes.ShaderNodeOutputMaterial)
+    bsdf_node = create_node(bl_material, Nodes.ShaderNodeBsdfPrincipled)
+    connect_nodes(bl_material, output_node.inputs[0], bsdf_node.outputs[0])
+    loaded_textures = {}
+    for texture_name, texture_info in map_tile.textures.items():
+        image = _load_texture(scene, texture_info.texture_id, force_load=True)
+        create_texture_node(bl_material, image, texture_name)
+        loaded_textures[texture_name] = image
+
+    modifier = mesh_obj.modifiers.new(type="DISPLACE", name="Displacement")
+    texture = bpy.data.textures.new(tile_name + "_TEXTURE", type="IMAGE")
+    texture.image = loaded_textures["worlddata_height_terrain"]
+    loaded_textures["worlddata_height_terrain"].colorspace_settings.name = 'Non-Color'
+
+    modifier.texture = texture
+    modifier.texture_coords = 'UV'
+    height_info = map_tile.textures["worlddata_height_terrain"]
+    tmp = next(iter(height_info.channels.values()), None)
+    if tmp is not None:
+        modifier.strength = tmp.max_range
+
+    modifier.mid_level = 0
+
+    parent_collection.objects.link(mesh_obj)
+
+    return parent_skeleton
+
+
 def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                     parent_skeleton: Optional[bpy.types.Object]):
     if node is None:
@@ -632,7 +733,7 @@ def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.t
     elif node.type == DMFNodeType.LOD:
         return import_dmf_lod(cast(DMFLodModel, node), scene, parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.INSTANCE:
-        return import_dmf_instance(cast(DMFInstance, node), parent_collection, parent_skeleton)
+        return import_dmf_instance(cast(DMFInstance, node), scene, parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.MODEL_GROUP:
         model_group = cast(DMFModelGroup, node)
         if not model_group.children:
@@ -646,6 +747,8 @@ def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.t
         if not node.children:
             return None
         return import_dmf_attachment(cast(DMFAttachment, node), scene, parent_collection, parent_skeleton)
+    elif node.type == DMFNodeType.MAP_TILE:
+        return import_dmf_map_file(cast(DMFMapTile, node), scene, parent_collection, parent_skeleton)
     else:
         raise NotImplementedError(f"Node of type {type(node)!r} not supported")
 
@@ -691,7 +794,10 @@ def import_dmf(scene: DMFSceneFile):
             LOGGER.info(f"Load progress {i + 1}/{len(scene.instances)}")
         instance_collection = bpy.data.collections.new(node.name)
         instances_collection.children.link(instance_collection)
-        import_dmf_node(node, scene, instance_collection, None)
+        if isinstance(node, DMFInstance) and node.transform.is_identity:
+            import_dmf_node(scene.instances[node.instance_id], scene, instance_collection, None)
+        else:
+            import_dmf_node(node, scene, instance_collection, None)
         CONTEXT["instances"][i] = instance_collection.name
 
     master_collection = bpy.data.collections.new("INSTANCES")

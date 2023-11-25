@@ -60,6 +60,7 @@ class DMFNodeType(Enum):
     SKINNED_MODEL = "SKINNED_MODEL"
     INSTANCE = "INSTANCE"
     ATTACHMENT = "ATTACHMENT"
+    MAP_TILE = "MAP_TILE"
 
 
 class JsonSerializable(Protocol):
@@ -149,6 +150,13 @@ class DMFTransform(JsonSerializable):
     @classmethod
     def identity(cls):
         return cls((0, 0, 0), (1, 1, 1), (0, 0, 0, 1))
+
+    @property
+    def is_identity(self):
+        return self.position == (0, 0, 0) and self.scale == (1, 1, 1) and self.rotation == (0, 0, 0, 1)
+
+    def __bool__(self):
+        return not self.is_identity
 
 
 @dataclass(slots=True)
@@ -261,7 +269,7 @@ class DMFNode(JsonSerializable):
     type: DMFNodeType
     name: Optional[str]
     collection_ids: List[int]
-    transform: Optional[DMFTransform]
+    transform: DMFTransform
     children: List['DMFNode']
     visible: bool
 
@@ -295,6 +303,10 @@ class DMFNode(JsonSerializable):
             return DMFInstance(node_type, name, collection_ids, transform, children, visible, data["instanceId"])
         if node_type == DMFNodeType.ATTACHMENT:
             return DMFAttachment(node_type, name, collection_ids, transform, children, visible, data["boneName"])
+        if node_type == DMFNodeType.MAP_TILE:
+            return DMFMapTile(node_type, name, collection_ids, transform, children, visible, data["gridCoordinate"],
+                              data["bboxMin"], data["bboxMax"],
+                              {name: TileTextureInfo.from_json(d) for name, d in data["textures"].items()})
 
         return DMFNode(node_type, name, collection_ids, transform, children, visible)
 
@@ -517,3 +529,33 @@ class DMFLodModel(DMFNode):
 @dataclass(slots=True)
 class DMFInstance(DMFNode):
     instance_id: int
+
+
+@dataclass(slots=True)
+class TileTextureChannelInfo:
+    usage: str
+    min_range: float
+    max_range: float
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]):
+        return cls(data["usage"], data["minRange"], data["maxRange"])
+
+
+@dataclass(slots=True)
+class TileTextureInfo:
+    texture_id: int
+    channels: dict[str, TileTextureChannelInfo]
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]):
+        channels = {channel: TileTextureChannelInfo.from_json(item) for channel, item in data["channels"].items()}
+        return cls(data["textureId"], channels)
+
+
+@dataclass(slots=True)
+class DMFMapTile(DMFNode):
+    grid_coordinate: tuple[int, int]
+    bbox_min: tuple[float, float, float]
+    bbox_max: tuple[float, float, float]
+    textures: dict[str, TileTextureInfo]
