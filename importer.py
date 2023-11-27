@@ -704,8 +704,9 @@ def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
         loaded_textures[texture_name] = image
 
     modifier = mesh_obj.modifiers.new(type="DISPLACE", name="Displacement")
-    texture = bpy.data.textures.new(tile_name + "_TEXTURE", type="IMAGE")
+    texture = bpy.data.textures.new(tile_name + "_HEIGHT_TEXTURE", type="IMAGE")
     texture.extension = 'EXTEND'
+    texture.use_interpolation = False
     texture.image = loaded_textures["worlddata_height_terrain"]
     loaded_textures["worlddata_height_terrain"].colorspace_settings.name = 'Non-Color'
 
