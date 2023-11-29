@@ -33,6 +33,18 @@ LOGGER = get_logger("DMF::Loader")
 CONTEXT = {'collections': [], "instances": {}}
 
 
+def get_collection(instance_uuid: str):
+    cache = bpy.context.scene.get("INSTANCE_CACHE", {})
+    if instance_uuid in cache:
+        return cache[instance_uuid]
+
+
+def add_collection(instance_uuid: str, collection: bpy.types.Collection):
+    cache = bpy.context.scene.get("INSTANCE_CACHE", {})
+    cache[instance_uuid] = collection.name
+    bpy.context.scene["INSTANCE_CACHE"] = cache
+
+
 def _convert_quat(quat: Tuple[float, float, float, float]):
     return quat[3], quat[0], quat[1], quat[2]
 
@@ -673,8 +685,8 @@ def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
 
     mesh_data = bpy.data.meshes.new(tile_name + f"_MESH")
     mesh_obj = bpy.data.objects.new(tile_name, mesh_data)
-    vertices, uvs = _generate_grid(512)
-    indices = _generate_indices(512)
+    vertices, uvs = _generate_grid(2)
+    indices = _generate_indices(2)
     vertices = np.asarray(vertices, np.float32)
     uvs = np.asarray(uvs, np.float32)
 
@@ -702,6 +714,12 @@ def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
         image = _load_texture(scene, texture_info.texture_id, force_load=True)
         create_texture_node(bl_material, image, texture_name)
         loaded_textures[texture_name] = image
+
+    modifier = mesh_obj.modifiers.new(type='SUBSURF', name="Subsurf")
+    modifier.levels = 8
+    modifier.render_levels = 9
+
+    modifier.subdivision_type = 'SIMPLE'
 
     modifier = mesh_obj.modifiers.new(type="DISPLACE", name="Displacement")
     texture = bpy.data.textures.new(tile_name + "_HEIGHT_TEXTURE", type="IMAGE")
@@ -766,7 +784,7 @@ def import_dmf(scene: DMFSceneFile):
     CONTEXT["instances"].clear()
     CONTEXT["collections"].clear()
 
-    if scene.meta_data.version != 1:
+    if scene.meta_data.version not in [1, 2]:
         raise ValueError(f"Version {scene.meta_data.version} is not supported!")
 
     # collections = CONTEXT["collections"] = []
@@ -789,19 +807,33 @@ def import_dmf(scene: DMFSceneFile):
     for layer_collection in _collect_view_collections(bpy.context.scene.view_layers[0].layer_collection):
         if layer_collection.collection.name == instances_collection.name:
             layer_collection.exclude = True
-
+    re_used = 0
     LOGGER.info(f"Loading {len(scene.instances)} instances")
     for i, node in enumerate(scene.instances):
         if i % 100 == 0:
             LOGGER.info(f"Load progress {i + 1}/{len(scene.instances)}")
-        instance_collection = bpy.data.collections.new(node.name)
-        instances_collection.children.link(instance_collection)
-        if isinstance(node, DMFInstance) and node.transform.is_identity:
-            import_dmf_node(scene.instances[node.instance_id], scene, instance_collection, None)
-        else:
-            import_dmf_node(node, scene, instance_collection, None)
-        CONTEXT["instances"][i] = instance_collection.name
-
+        if scene.meta_data.version == 1:
+            instance_collection = bpy.data.collections.new(node.name)
+            instances_collection.children.link(instance_collection)
+            if isinstance(node, DMFInstance) and node.transform.is_identity:
+                import_dmf_node(scene.instances[node.instance_id], scene, instance_collection, None)
+            else:
+                import_dmf_node(node, scene, instance_collection, None)
+            CONTEXT["instances"][i] = instance_collection.name
+        elif scene.meta_data.version == 2:
+            if get_collection(node.uuid):
+                CONTEXT["instances"][i] = get_collection(node.uuid)
+                re_used += 1
+                continue
+            root_node = node.root_node
+            instance_collection = bpy.data.collections.new(root_node.name)
+            instances_collection.children.link(instance_collection)
+            if isinstance(root_node, DMFInstance) and root_node.transform.is_identity:
+                import_dmf_node(scene.instances[root_node.instance_id].root_node, scene, instance_collection, None)
+            else:
+                import_dmf_node(root_node, scene, instance_collection, None)
+            CONTEXT["instances"][i] = instance_collection.name
+            add_collection(node.uuid, instance_collection)
     master_collection = bpy.data.collections.new("INSTANCES")
     bpy.context.scene.collection.children.link(master_collection)
 
@@ -810,6 +842,8 @@ def import_dmf(scene: DMFSceneFile):
         if i % 100 == 0:
             LOGGER.info(f"Load progress {i + 1}/{len(scene.models)}")
         import_dmf_node(node, scene, master_collection, None)
+
+    print("Re-used",re_used,"instances")
 
 
 def import_dmf_from_path(file: Path):

@@ -3,7 +3,7 @@ from base64 import b64decode
 from dataclasses import dataclass, asdict, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Protocol, Tuple, Optional, List
+from typing import Dict, Any, Protocol, Tuple, Optional, List, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -83,7 +83,7 @@ class DMFTextureDescriptor(JsonSerializable):
         return {"textureId": self.texture_id, "channels": self.channels, "usageType": self.usage_type}
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["textureId"], data["channels"], data["usageType"])
 
 
@@ -96,7 +96,7 @@ class DMFSceneMetaData(JsonSerializable):
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(**data)
 
 
@@ -116,7 +116,7 @@ class DMFTexture(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["name"], data["bufferId"], data.get("usageType", 0), data.get("metadata", {}))
 
 
@@ -130,7 +130,7 @@ class DMFCollection(JsonSerializable):
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["name"], data.get("enabled", True), data.get("parent", None))
 
 
@@ -144,7 +144,7 @@ class DMFTransform(JsonSerializable):
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(**data)
 
     @classmethod
@@ -175,7 +175,7 @@ class DMFBone(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(
             data["name"],
             DMFTransform.from_json(data["transform"]) if "transform" in data else DMFTransform.identity(),
@@ -192,7 +192,7 @@ class DMFBuffer(JsonSerializable):
     data: Optional[str]
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data.get("name", "<NONE>"), data["size"], data.get("path", None), data.get("data", None))
 
     def to_json(self):
@@ -225,7 +225,7 @@ class DMFBufferView(JsonSerializable):
         return {"bufferId": self.buffer_id, "offset": self.offset, "size": self.size}
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["bufferId"], data["offset"], data["size"])
 
 
@@ -238,7 +238,7 @@ class DMFSkeleton(JsonSerializable):
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         transform = DMFTransform.from_json(data["transform"]) if "transform" in data else DMFTransform.identity()
         return cls([DMFBone.from_json(item) for item in data.get("bones", [])], transform)
 
@@ -259,7 +259,7 @@ class DMFMaterial(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["name"], data.get("type", "UNKNOWN"), data.get("textureIds", []),
                    [DMFTextureDescriptor.from_json(desc) for desc in data.get("textureDescriptors", [])])
 
@@ -277,7 +277,7 @@ class DMFNode(JsonSerializable):
         return asdict(self)
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         if data is None:
             return None
         node_type = DMFNodeType(data["type"])
@@ -312,6 +312,19 @@ class DMFNode(JsonSerializable):
 
 
 @dataclass(slots=True)
+class DMFInstanceSource(JsonSerializable):
+    uuid: str
+    root_node: DMFNode
+
+    def to_json(self):
+        return {"uuid": self.uuid, "rootNode": self.root_node.to_json()}
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
+        return cls(data["uuid"], DMFNode.from_json(data.get("rootNode")))
+
+
+@dataclass(slots=True)
 class DMFSceneFile(JsonSerializable):
     meta_data: DMFSceneMetaData
     collections: List[DMFCollection]
@@ -321,7 +334,7 @@ class DMFSceneFile(JsonSerializable):
     buffer_views: List[DMFBufferView]
     materials: List[DMFMaterial]
     textures: List[DMFTexture]
-    instances: List[DMFNode]
+    instances: List[Union[DMFNode, DMFInstanceSource]]
 
     _buffers_path: Optional[Path] = field(default=None)
 
@@ -339,8 +352,15 @@ class DMFSceneFile(JsonSerializable):
 
     @classmethod
     def from_json(cls, data: Dict[str, Any]):
+        meta_data = DMFSceneMetaData.from_json(data["metadata"])
+        if meta_data.version == 1:
+            instances = [DMFNode.from_json(item) for item in data.get("instances", [])]
+        elif meta_data.version == 2:
+            instances = [DMFInstanceSource.from_json(item) for item in data.get("instances", [])]
+        else:
+            raise NotImplementedError(f"DMF version {meta_data.version} not supported")
         return cls(
-            DMFSceneMetaData.from_json(data["metadata"]),
+            meta_data,
             [DMFCollection.from_json(item) for item in data.get("collections", [])],
             [DMFNode.from_json(item) for item in data.get("models", [])],
             [DMFSkeleton.from_json(item) for item in data.get("skeletons", [])],
@@ -348,7 +368,7 @@ class DMFSceneFile(JsonSerializable):
             [DMFBufferView.from_json(item) for item in data.get("bufferViews", [])],
             [DMFMaterial.from_json(item) for item in data.get("materials", [])],
             [DMFTexture.from_json(item) for item in data.get("textures", [])],
-            [DMFNode.from_json(item) for item in data.get("instances", [])],
+            instances,
         )
 
     def set_buffers_path(self, buffers_path: Path):
@@ -382,7 +402,7 @@ class DMFVertexAttribute(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(
             DMFSemantic(data["semantic"]),
             data["elementCount"],
@@ -447,7 +467,7 @@ class DMFPrimitive(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(
             data["groupingId"],
             data["vertexCount"],
@@ -480,7 +500,7 @@ class DMFMesh(JsonSerializable):
         }
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         remap_table = {int(k): v for k, v in data.get("boneRemapTable", {}).items()}
 
         return cls([DMFPrimitive.from_json(item) for item in data.get("primitives", [])], remap_table)
@@ -514,7 +534,7 @@ class DMFLod(JsonSerializable):
     distance: float
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(DMFNode.from_json(data.get("model", None)), data["id"], data["distance"])
 
     def to_json(self):
@@ -538,7 +558,7 @@ class TileTextureChannelInfo:
     max_range: float
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["usage"], data["minRange"], data["maxRange"])
 
 
@@ -548,7 +568,7 @@ class TileTextureInfo:
     channels: dict[str, TileTextureChannelInfo]
 
     @classmethod
-    def from_json(cls, data: Dict[str, Any]):
+    def from_json(cls, data: Dict[str, Any], version: int = 1):
         channels = {channel: TileTextureChannelInfo.from_json(item) for channel, item in data["channels"].items()}
         return cls(data["textureId"], channels)
 
