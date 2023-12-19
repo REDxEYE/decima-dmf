@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 from collections import defaultdict
 from itertools import groupby
 from pathlib import Path
@@ -245,8 +246,11 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         mesh_data.polygons.foreach_set('material_index', material_ids[:all_indices.shape[0]])
 
         if skeleton is not None and model.skeleton_id is not None:
-            _add_skinning(scene.skeletons[model.skeleton_id], mesh_obj, model.mesh, primitive_0, vertex_data)
-
+            try:
+                _add_skinning(scene.skeletons[model.skeleton_id], mesh_obj, model.mesh, primitive_0, vertex_data)
+            except IndexError as e:
+                LOGGER.error("Failed to apply skinning", exc_info=sys.exc_info())
+                pass
         primitives.append(mesh_obj)
     return primitives
 
@@ -843,7 +847,7 @@ def import_dmf(scene: DMFSceneFile):
             LOGGER.info(f"Load progress {i + 1}/{len(scene.models)}")
         import_dmf_node(node, scene, master_collection, None)
 
-    print("Re-used",re_used,"instances")
+    print("Re-used", re_used, "instances")
 
 
 def import_dmf_from_path(file: Path):
