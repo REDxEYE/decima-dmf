@@ -5,8 +5,8 @@ from .operators import DMF_OT_DMFImport
 bl_info = {
     "name": "DMF Import plugin",
     "author": "REDxEYE",
-    "version": (0, 0, 2),
-    "blender": (3, 0, 0),
+    "version": (0, 0, 3),
+    "blender": (3, 3, 0),
     "description": "Import `Decima Workshop` dmf files",
     "category": "Import-Export"
 }

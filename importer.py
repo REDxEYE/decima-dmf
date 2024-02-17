@@ -6,7 +6,6 @@ from itertools import groupby
 from pathlib import Path
 from typing import cast, Optional, Dict, List, Tuple
 
-import bmesh
 import bpy
 import numpy as np
 import numpy.typing as npt
@@ -21,6 +20,8 @@ from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
 from .material_utils import (clear_nodes, Nodes, create_node,
                              connect_nodes, create_texture_node,
                              create_material)
+
+is_blender_4 = bpy.app.version >= (4, 0, 0)
 
 
 def get_logger(name) -> logging.Logger:
@@ -409,7 +410,10 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
         socket = list(descriptor_to_socket["Reflectance"])[0]
         invert_node = create_node(bl_material, Nodes.ShaderNodeInvert)
         connect_nodes(bl_material, socket, invert_node.inputs[1])
-        connect_nodes(bl_material, invert_node.outputs[0], bsdf_node.inputs["Specular"])
+        if is_blender_4:
+            connect_nodes(bl_material, invert_node.outputs[0], bsdf_node.inputs["Specular IOR Level"])
+        else:
+            connect_nodes(bl_material, invert_node.outputs[0], bsdf_node.inputs["Specular"])
 
     if "Mask" in descriptor_to_socket:
         socket = list(descriptor_to_socket["Mask"])[0]
