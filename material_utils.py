@@ -5,15 +5,14 @@ import bpy
 
 
 def create_material(mat_name, model_obj):
-    model_data = model_obj.data
     mat = bpy.data.materials.get(mat_name, None)
     if mat:
-        if model_data.materials.get(mat.name, None):
+        if model_obj.data.materials.get(mat.name, None):
             return mat
     else:
         mat = bpy.data.materials.new(mat_name)
         mat.diffuse_color = [random.uniform(.4, 1) for _ in range(3)] + [1.0]
-    model_data.materials.append(mat)
+    model_obj.data.materials.append(mat)
     return mat
 
 

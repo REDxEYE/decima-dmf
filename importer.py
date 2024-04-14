@@ -4,7 +4,7 @@ import sys
 from collections import defaultdict
 from itertools import groupby
 from pathlib import Path
-from typing import cast, Optional, Dict, List, Tuple
+from typing import cast, Optional
 
 import bpy
 import numpy as np
@@ -32,22 +32,25 @@ def get_logger(name) -> logging.Logger:
 
 LOGGER = get_logger("DMF::Loader")
 
-CONTEXT = {'collections': [], "instances": {}}
+CONTEXT = {
+    "collections": [],
+    "instances": {},
+    "instance_cache": {}
+}
 
 
 def get_collection(instance_uuid: str):
-    cache = bpy.context.scene.get("INSTANCE_CACHE", {})
+    cache = CONTEXT["instance_cache"]
     if instance_uuid in cache:
         return cache[instance_uuid]
 
 
 def add_collection(instance_uuid: str, collection: bpy.types.Collection):
-    cache = bpy.context.scene.get("INSTANCE_CACHE", {})
+    cache = CONTEXT["instance_cache"]
     cache[instance_uuid] = collection.name
-    bpy.context.scene["INSTANCE_CACHE"] = cache
 
 
-def _convert_quat(quat: Tuple[float, float, float, float]):
+def _convert_quat(quat: tuple[float, float, float, float]):
     return quat[3], quat[0], quat[1], quat[2]
 
 
@@ -134,7 +137,7 @@ def _get_buffer_view_data(buffer_view: DMFBufferView, scene: DMFSceneFile) -> by
 def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
     mode = primitive.vertex_type
     dtype_fields = []
-    dtype_metadata: Dict[str, str] = {}
+    dtype_metadata: dict[str, str] = {}
     for attribute in primitive.vertex_attributes.values():
         if attribute.element_count > 1:
             dtype_fields.append((attribute.semantic.name, attribute.element_type.dtype, attribute.element_count))
@@ -144,15 +147,15 @@ def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
     dtype = np.dtype(dtype_fields, metadata=dtype_metadata)
     if mode == DMFBufferType.SINGLE_BUFFER:
         data = np.zeros(primitive.vertex_count, dtype)
-        buffer_groups: Dict[int, List[DMFVertexAttribute]] = defaultdict(list)
+        buffer_groups: dict[int, list[DMFVertexAttribute]] = defaultdict(list)
         for attr in primitive.vertex_attributes.values():
             buffer_groups[attr.buffer_view_id].append(attr)
         for buffer_view_id, attributes in buffer_groups.items():
             total_offset = 0
             holes = {}
             stream_dtype_fields = []
-            stream_dtype_metadata: Dict[str, str] = {}
-            sorted_attributes: List[DMFVertexAttribute] = sorted(attributes, key=lambda a: a.offset)
+            stream_dtype_metadata: dict[str, str] = {}
+            sorted_attributes: list[DMFVertexAttribute] = sorted(attributes, key=lambda a: a.offset)
             for attribute in sorted_attributes:
                 if total_offset != attribute.offset:
                     hole_name = f"HOLE_{total_offset}"
@@ -198,7 +201,7 @@ def _get_primitives_indices(primitive: DMFPrimitive, scene: DMFSceneFile):
 
 def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.Object):
     primitives = []
-    primitive_groups: Dict[int, List[DMFPrimitive]] = defaultdict(list)
+    primitive_groups: dict[int, list[DMFPrimitive]] = defaultdict(list)
     for primitive in model.mesh.primitives:
         primitive_groups[primitive.grouping_id].append(primitive)
 
@@ -208,7 +211,7 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         material_ids = np.zeros(primitive_group[0].index_count // 3, np.int32)
         material_id = 0
         vertex_data = _get_primitive_vertex_data(primitive_group[0], scene)
-        total_indices: List[npt.NDArray[np.uint32]] = []
+        total_indices: list[npt.NDArray[np.uint32]] = []
         primitive_0 = primitive_group[0]
         for primitive in primitive_group:
             material = scene.materials[primitive.material_id]
@@ -345,7 +348,7 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
         if texture_id == -1:
             continue
         texture_description = []
-        texture_descriptors: List[DMFTextureDescriptor] = list(texture_descriptors)
+        texture_descriptors: list[DMFTextureDescriptor] = list(texture_descriptors)
         use_rgb_split = False
         non_color = False
         for texture_descriptor in texture_descriptors:
@@ -536,9 +539,9 @@ def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, pare
         if obj:
             obj.parent = parent_skeleton
             if model_group.transform is not None:
-                matrix = (Matrix.Translation(Vector(model_group.transform.position)) @
+                matrix = (Matrix.Translation(model_group.transform.position) @
                           Quaternion(_convert_quat(model_group.transform.rotation)).to_matrix().to_4x4() @
-                          Matrix.Diagonal(Vector(model_group.transform.scale)).to_4x4()
+                          Matrix.Diagonal(model_group.transform.scale).to_4x4()
                           )
                 obj.matrix_basis = matrix @ obj.matrix_basis
         return obj
@@ -584,18 +587,30 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
 
 def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                         parent_skeleton: Optional[bpy.types.Object]):
-    obj = bpy.data.objects.new(instance_model.name, None)
-    obj.empty_display_size = 1
+    if instance_model.instance_id == -1 and not instance_model.children:
+        return None
 
     if instance_model.instance_id != -1:
         if isinstance(scene.instances[instance_model.instance_id],
                       DMFInstance) and instance_model.transform.is_identity:
-            return import_dmf_instance(cast(DMFInstance, scene.instances[instance_model.instance_id]),
-                                       scene, parent_collection, parent_skeleton)
+            obj = import_dmf_instance(cast(DMFInstance, scene.instances[instance_model.instance_id]),
+                                      scene, parent_collection, parent_skeleton)
+            matrix = (Matrix.Translation(instance_model.transform.position) @
+                      Quaternion(_convert_quat(instance_model.transform.rotation)).to_matrix().to_4x4() @
+                      Matrix.Diagonal(instance_model.transform.scale).to_4x4()
+                      )
+            obj.matrix_world @= matrix
+            return obj
+
+        obj = bpy.data.objects.new(instance_model.name, None)
+        obj.empty_display_size = 1
         instance_name = CONTEXT["instances"][instance_model.instance_id]
         name_ = bpy.data.collections[instance_name]
         obj.instance_type = 'COLLECTION'
         obj.instance_collection = name_
+    else:
+        obj = bpy.data.objects.new(instance_model.name, None)
+        obj.empty_display_size = 1
 
     if instance_model.transform:
         obj.location = instance_model.transform.position
@@ -724,26 +739,24 @@ def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
         loaded_textures[texture_name] = image
 
     modifier = mesh_obj.modifiers.new(type='SUBSURF', name="Subsurf")
-    modifier.levels = 8
-    modifier.render_levels = 9
-
+    modifier.levels = 5
+    modifier.render_levels = 8
     modifier.subdivision_type = 'SIMPLE'
 
-    modifier = mesh_obj.modifiers.new(type="DISPLACE", name="Displacement")
     texture = bpy.data.textures.new(tile_name + "_HEIGHT_TEXTURE", type="IMAGE")
     texture.extension = 'EXTEND'
     texture.use_interpolation = False
     texture.image = loaded_textures["worlddata_height_terrain"]
-    loaded_textures["worlddata_height_terrain"].colorspace_settings.name = 'Non-Color'
-
+    texture.image.colorspace_settings.name = 'Non-Color'
+    modifier = mesh_obj.modifiers.new(type="DISPLACE", name="Displacement")
     modifier.texture = texture
     modifier.texture_coords = 'UV'
+    modifier.mid_level = 0
+
     height_info = map_tile.textures["worlddata_height_terrain"]
     tmp = next(iter(height_info.channels.values()), None)
     if tmp is not None:
         modifier.strength = tmp.max_range
-
-    modifier.mid_level = 0
 
     parent_collection.objects.link(mesh_obj)
 
@@ -852,6 +865,8 @@ def import_dmf(scene: DMFSceneFile):
         import_dmf_node(node, scene, master_collection, None)
 
     print("Re-used", re_used, "instances")
+
+    bpy.context.scene["INSTANCE_CACHE"] = CONTEXT["instance_cache"]
 
 
 def import_dmf_from_path(file: Path):
