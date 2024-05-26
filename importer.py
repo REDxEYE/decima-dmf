@@ -22,6 +22,7 @@ from .material_utils import (clear_nodes, Nodes, create_node,
                              create_material)
 
 is_blender_4 = bpy.app.version >= (4, 0, 0)
+is_blender_4_1 = bpy.app.version >= (4, 1, 0)
 
 
 def get_logger(name) -> logging.Logger:
@@ -243,7 +244,8 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
 
         if primitive_0.has_attribute(DMFSemantic.NORMAL):
             mesh_data.polygons.foreach_set("use_smooth", np.ones(len(mesh_data.polygons), np.uint32))
-            mesh_data.use_auto_smooth = True
+            if not is_blender_4_1:
+                mesh_data.use_auto_smooth = True
             normal_data = _convert_type_and_size(DMFSemantic.NORMAL, vertex_data, np.float32, element_end=3)
             mesh_data.normals_split_custom_set_from_vertices(normal_data)
 
