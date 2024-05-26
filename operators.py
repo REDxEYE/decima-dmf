@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import bpy
@@ -22,8 +23,10 @@ class DMF_OT_DMFImport(bpy.types.Operator):
             directory = Path(self.filepath).absolute()
         for file in self.files:
             file = directory / file.name
+            _start = time.time()
             import_dmf_from_path(file)
-
+            print(f'Imported {file.name} took {time.time() - _start:.2f} seconds')
+            self.report({'INFO'}, f"Import Complete. Took {time.time()- _start:.2f} seconds")
         return {'FINISHED'}
 
     def invoke(self, context, event):
