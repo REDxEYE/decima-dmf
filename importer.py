@@ -14,7 +14,7 @@ from mathutils import Vector, Quaternion, Matrix
 from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
                   DMFNodeType, DMFModelGroup, DMFLodModel,
                   DMFPrimitive, DMFSceneFile, DMFSkeleton,
-                  DMFSemantic, DMFComponentType, DMFInstance,
+                  DMFSemantic, DMFComponentType, DMFInstance, DMFMassInstance,
                   DMFBufferType, DMFBufferView, DMFTextureDescriptor,
                   DMFSkinnedModel, DMFAttachment, DMFVertexAttribute, DMFMapTile)
 from .material_utils import (clear_nodes, Nodes, create_node,
@@ -533,6 +533,8 @@ def import_dmf_model(model: DMFModel, scene: DMFSceneFile, parent_collection: bp
 def import_dmf_model_group(model_group: DMFModelGroup, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                            parent_skeleton: Optional[bpy.types.Object]):
     LOGGER.debug(f"Loading \"{model_group.name}\" model group")
+    if not model_group.children:
+        return
     group_collection = bpy.data.collections.new(model_group.name)
     parent_collection.children.link(group_collection)
 
@@ -587,6 +589,41 @@ def import_dmf_lod(lod_model: DMFLodModel, scene: DMFSceneFile, parent_collectio
     return group_obj
 
 
+def import_dmf_mass_instance(instance_model: DMFMassInstance, scene: DMFSceneFile,
+                             parent_collection: bpy.types.Collection,
+                             parent_skeleton: Optional[bpy.types.Object]):
+    if (instance_model.instance_id == -1 and not instance_model.children) or not instance_model.instance_id:
+        return None
+    if len(instance_model.instance_data) == 1:
+        transform, name = instance_model.instance_data[0]
+        obj = import_dmf_node(scene.instances[instance_model.instance_id], scene, parent_collection, parent_skeleton)
+        obj.name = name
+        matrix = (Matrix.Translation(transform.position) @
+                  Quaternion(_convert_quat(transform.rotation)).to_matrix().to_4x4() @
+                  Matrix.Diagonal(transform.scale).to_4x4()
+                  )
+        obj.matrix_world @= matrix
+        return obj
+    else:
+        group_obj = bpy.data.objects.new(instance_model.name, None)
+        collection = bpy.data.collections[CONTEXT["instances"][instance_model.instance_id]]
+        LOGGER.info(f"Importing {len(instance_model.instance_data)} - {instance_model.name}")
+        for transform, name in instance_model.instance_data:
+            matrix = (Matrix.Translation(transform.position) @
+                      Quaternion(_convert_quat(transform.rotation)).to_matrix().to_4x4() @
+                      Matrix.Diagonal(transform.scale).to_4x4()
+                      )
+            obj = bpy.data.objects.new(name, None)
+            obj.empty_display_size = 1
+            obj.instance_type = 'COLLECTION'
+            obj.instance_collection = collection
+            obj.matrix_world @= matrix
+            obj.parent = group_obj
+            parent_collection.objects.link(obj)
+        parent_collection.objects.link(group_obj)
+        return group_obj
+
+
 def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent_collection: bpy.types.Collection,
                         parent_skeleton: Optional[bpy.types.Object]):
     if instance_model.instance_id == -1 and not instance_model.children:
@@ -595,22 +632,11 @@ def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent
     if instance_model.instance_id != -1:
         if isinstance(scene.instances[instance_model.instance_id],
                       DMFInstance) and instance_model.transform.is_identity:
-            obj = import_dmf_instance(cast(DMFInstance, scene.instances[instance_model.instance_id]),
-                                      scene, parent_collection, parent_skeleton)
-            matrix = (Matrix.Translation(instance_model.transform.position) @
-                      Quaternion(_convert_quat(instance_model.transform.rotation)).to_matrix().to_4x4() @
-                      Matrix.Diagonal(instance_model.transform.scale).to_4x4()
-                      )
-            obj.matrix_world @= matrix
-            return obj
+            return import_dmf_instance_of_instance(instance_model, parent_collection, parent_skeleton, scene)
 
-        obj = bpy.data.objects.new(instance_model.name, None)
-        obj.empty_display_size = 1
-        instance_name = CONTEXT["instances"][instance_model.instance_id]
-        name_ = bpy.data.collections[instance_name]
-        obj.instance_type = 'COLLECTION'
-        obj.instance_collection = name_
+        obj = import_dmf_instance_collection_instance(instance_model)
     else:
+        LOGGER.warning("This is kind of illegal instance, exporter should use model group for that!")
         obj = bpy.data.objects.new(instance_model.name, None)
         obj.empty_display_size = 1
 
@@ -622,9 +648,29 @@ def import_dmf_instance(instance_model: DMFInstance, scene: DMFSceneFile, parent
 
     parent_collection.objects.link(obj)
     for child in instance_model.children:
+        LOGGER.warning("This is kind of wrong, instance should not have children")
         c_obj = import_dmf_node(child, scene, parent_collection, parent_skeleton)
         c_obj.parent = obj
 
+    return obj
+
+
+def import_dmf_instance_collection_instance(instance_model: DMFInstance):
+    obj = bpy.data.objects.new(instance_model.name, None)
+    obj.empty_display_size = 1
+    obj.instance_type = 'COLLECTION'
+    obj.instance_collection = bpy.data.collections[CONTEXT["instances"][instance_model.instance_id]]
+    return obj
+
+
+def import_dmf_instance_of_instance(instance_model: DMFInstance, parent_collection, parent_skeleton, scene):
+    obj = import_dmf_instance(cast(DMFInstance, scene.instances[instance_model.instance_id]),
+                              scene, parent_collection, parent_skeleton)
+    matrix = (Matrix.Translation(instance_model.transform.position) @
+              Quaternion(_convert_quat(instance_model.transform.rotation)).to_matrix().to_4x4() @
+              Matrix.Diagonal(instance_model.transform.scale).to_4x4()
+              )
+    obj.matrix_world @= matrix
     return obj
 
 
@@ -699,7 +745,7 @@ def _generate_indices(grid_size):
     return indices
 
 
-def import_dmf_map_file(map_tile: DMFMapTile, scene: DMFSceneFile,
+def import_dmf_map_tile(map_tile: DMFMapTile, scene: DMFSceneFile,
                         parent_collection: bpy.types.Collection,
                         parent_skeleton: Optional[bpy.types.Object]):
     if "worlddata_height_terrain" not in map_tile.textures:
@@ -791,7 +837,9 @@ def import_dmf_node(node: DMFNode, scene: DMFSceneFile, parent_collection: bpy.t
             return None
         return import_dmf_attachment(cast(DMFAttachment, node), scene, parent_collection, parent_skeleton)
     elif node.type == DMFNodeType.MAP_TILE:
-        return import_dmf_map_file(cast(DMFMapTile, node), scene, parent_collection, parent_skeleton)
+        return import_dmf_map_tile(cast(DMFMapTile, node), scene, parent_collection, parent_skeleton)
+    elif node.type == DMFNodeType.MASS_INSTANCE:
+        return import_dmf_mass_instance(cast(DMFMapTile, node), scene, parent_collection, parent_skeleton)
     else:
         raise NotImplementedError(f"Node of type {type(node)!r} not supported")
 
@@ -806,8 +854,10 @@ def _collect_view_collections(parent):
 def import_dmf(scene: DMFSceneFile):
     CONTEXT["instances"].clear()
     CONTEXT["collections"].clear()
-
-    if scene.meta_data.version not in [1, 2]:
+    # V1 - first ever released
+    # V2 - added Tile node
+    # V3 - added massive instancing node
+    if scene.meta_data.version not in [1, 2, 3]:
         raise ValueError(f"Version {scene.meta_data.version} is not supported!")
 
     # collections = CONTEXT["collections"] = []
@@ -832,6 +882,7 @@ def import_dmf(scene: DMFSceneFile):
             layer_collection.exclude = True
     re_used = 0
     LOGGER.info(f"Loading {len(scene.instances)} instances")
+    CONTEXT["instances"] = dict.fromkeys(range(len(scene.instances)))
     for i, node in enumerate(scene.instances):
         if i % 100 == 0:
             LOGGER.info(f"Load progress {i + 1}/{len(scene.instances)}")

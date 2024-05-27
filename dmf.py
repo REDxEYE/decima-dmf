@@ -61,6 +61,7 @@ class DMFNodeType(Enum):
     INSTANCE = "INSTANCE"
     ATTACHMENT = "ATTACHMENT"
     MAP_TILE = "MAP_TILE"
+    MASS_INSTANCE = "MASS_INSTANCE"
 
 
 class JsonSerializable(Protocol):
@@ -307,6 +308,10 @@ class DMFNode(JsonSerializable):
             return DMFMapTile(node_type, name, collection_ids, transform, children, visible, data["gridCoordinate"],
                               data["bboxMin"], data["bboxMax"],
                               {name: TileTextureInfo.from_json(d) for name, d in data["textures"].items()})
+        if node_type == DMFNodeType.MASS_INSTANCE:
+            return DMFMassInstance(node_type, name, collection_ids, transform, children, visible, data["instanceId"],
+                                   [(DMFTransform.from_json(item[0]), item[1]) for item in
+                                    data.get("instancesData", [])])
 
         return DMFNode(node_type, name, collection_ids, transform, children, visible)
 
@@ -549,6 +554,12 @@ class DMFLodModel(DMFNode):
 @dataclass(slots=True)
 class DMFInstance(DMFNode):
     instance_id: int
+
+
+@dataclass(slots=True)
+class DMFMassInstance(DMFNode):
+    instance_id: int
+    instance_data: list[tuple[DMFTransform, str]]
 
 
 @dataclass(slots=True)
