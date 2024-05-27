@@ -856,7 +856,7 @@ def import_dmf(scene: DMFSceneFile):
     CONTEXT["collections"].clear()
     # V1 - first ever released
     # V2 - added Tile node
-    # V3 - added massive instancing node
+    # V3 - added massive instancing node (massive instancing node is compatible with V1)
     if scene.meta_data.version not in [1, 2, 3]:
         raise ValueError(f"Version {scene.meta_data.version} is not supported!")
 

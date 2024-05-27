@@ -360,7 +360,7 @@ class DMFSceneFile(JsonSerializable):
         meta_data = DMFSceneMetaData.from_json(data["metadata"])
         if meta_data.version == 1:
             instances = [DMFNode.from_json(item) for item in data.get("instances", [])]
-        elif meta_data.version == 2:
+        elif meta_data.version in [2, 3]:
             instances = [DMFInstanceSource.from_json(item) for item in data.get("instances", [])]
         else:
             raise NotImplementedError(f"DMF version {meta_data.version} not supported")
