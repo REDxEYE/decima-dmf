@@ -186,8 +186,8 @@ def _get_primitive_vertex_data(primitive: DMFPrimitive, scene: DMFSceneFile):
     else:
         data = np.zeros(primitive.vertex_count, dtype)
         for attribute in primitive.vertex_attributes.values():
-            data[attribute.semantic][:] = primitive.vertex_attributes[attribute.semantic].convert(scene)[
-                                          primitive.vertex_start:primitive.vertex_end]
+            data[attribute.semantic.name][:] = primitive.vertex_attributes[attribute.semantic].convert(scene)[
+                                               primitive.vertex_start:primitive.vertex_end]
     return data
 
 
@@ -237,7 +237,10 @@ def _load_primitives(model: DMFModel, scene: DMFSceneFile, skeleton: bpy.types.O
         for uv_layer_id in range(7):
             semantic = DMFSemantic(f"TEXCOORD_{uv_layer_id}")
             if primitive_0.has_attribute(semantic):
-                _add_uv(mesh_data, f"UV{uv_layer_id}", _convert_type_and_size(semantic, t_vertex_data, np.float32))
+                uv = _convert_type_and_size(semantic, t_vertex_data, np.float32)
+                if primitive_0.flip_uv:
+                    uv[:, 1] = 1 - uv[:, 1]
+                _add_uv(mesh_data, f"UV{uv_layer_id}", uv)
 
         for i in range(4):
             _add_color(DMFSemantic(f"COLOR_{i}"), mesh_data, primitive_0, t_vertex_data)
@@ -359,7 +362,7 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
             if texture_descriptor.channels not in ("RGBA", "RGB", "A"):
                 use_rgb_split = True
                 non_color = True
-            if texture_descriptor == "Normal":
+            if texture_descriptor.usage_type == "Normal":
                 non_color = True
             new_name = f"{texture_descriptor.usage_type}_{texture_descriptor.channels}"
             if new_name in texture_description:
@@ -609,15 +612,14 @@ def import_dmf_mass_instance(instance_model: DMFMassInstance, scene: DMFSceneFil
         collection = bpy.data.collections[CONTEXT["instances"][instance_model.instance_id]]
         LOGGER.info(f"Importing {len(instance_model.instance_data)} - {instance_model.name}")
         for transform, name in instance_model.instance_data:
-            matrix = (Matrix.Translation(transform.position) @
-                      Quaternion(_convert_quat(transform.rotation)).to_matrix().to_4x4() @
-                      Matrix.Diagonal(transform.scale).to_4x4()
-                      )
+            matrix = Matrix.LocRotScale(transform.position,
+                                        Quaternion(_convert_quat(transform.rotation)),
+                                        transform.scale)
             obj = bpy.data.objects.new(name, None)
             obj.empty_display_size = 1
             obj.instance_type = 'COLLECTION'
             obj.instance_collection = collection
-            obj.matrix_world @= matrix
+            obj.matrix_world = matrix
             obj.parent = group_obj
             parent_collection.objects.link(obj)
         parent_collection.objects.link(group_obj)
@@ -857,7 +859,8 @@ def import_dmf(scene: DMFSceneFile):
     # V1 - first ever released
     # V2 - added Tile node
     # V3 - added massive instancing node (massive instancing node is compatible with V1)
-    if scene.meta_data.version not in [1, 2, 3]:
+    # V4 - added flipUv for primitives
+    if scene.meta_data.version not in [1, 2, 3, 4]:
         raise ValueError(f"Version {scene.meta_data.version} is not supported!")
 
     # collections = CONTEXT["collections"] = []

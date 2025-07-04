@@ -229,6 +229,9 @@ class DMFBufferView(JsonSerializable):
     def from_json(cls, data: Dict[str, Any], version: int = 1):
         return cls(data["bufferId"], data["offset"], data["size"])
 
+    def get_data(self, scene: 'DMFSceneFile'):
+        return scene.buffers[self.buffer_id].get_data(scene.buffers_path)
+
 
 @dataclass(slots=True)
 class DMFSkeleton(JsonSerializable):
@@ -360,7 +363,7 @@ class DMFSceneFile(JsonSerializable):
         meta_data = DMFSceneMetaData.from_json(data["metadata"])
         if meta_data.version == 1:
             instances = [DMFNode.from_json(item) for item in data.get("instances", [])]
-        elif meta_data.version in [2, 3]:
+        elif meta_data.version in [2, 3, 4]:
             instances = [DMFInstanceSource.from_json(item) for item in data.get("instances", [])]
         else:
             raise NotImplementedError(f"DMF version {meta_data.version} not supported")
@@ -426,8 +429,8 @@ class DMFVertexAttribute(JsonSerializable):
         supported_element_type = element_type in [item.name for item in list(DMFComponentType)]
         return supported_semantic and supported_element_type
 
-    def convert(self, scene) -> npt.NDArray:
-        buffer = scene.buffers_views[self.buffer_view_id].get_data(scene)[self.offset:]
+    def convert(self, scene: DMFSceneFile) -> npt.NDArray:
+        buffer = scene.buffer_views[self.buffer_view_id].get_data(scene)[self.offset:]
         data = np.frombuffer(buffer, self.element_type.dtype).reshape((-1, self.element_count))
         return data
 
@@ -453,6 +456,8 @@ class DMFPrimitive(JsonSerializable):
 
     material_id: Optional[int]
 
+    flip_uv: bool
+
     _dtype: npt.DTypeLike = None
 
     def to_json(self):
@@ -468,7 +473,8 @@ class DMFPrimitive(JsonSerializable):
             "indexEnd": self.index_end,
             "indexSize": self.index_size,
             "indexBufferViewId": self.index_buffer_view_id,
-            "materialId": self.material_id
+            "materialId": self.material_id,
+            "flipUv": self.flip_uv
         }
 
     @classmethod
@@ -487,6 +493,7 @@ class DMFPrimitive(JsonSerializable):
             data["indexSize"],
             data["indexBufferViewId"],
             data.get("materialId", None),
+            data.get("flipUv", False),
         )
 
     def has_attribute(self, semantic: DMFSemantic):
