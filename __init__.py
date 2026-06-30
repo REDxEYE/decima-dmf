@@ -6,7 +6,7 @@ bl_info = {
     "name": "DMF Import plugin",
     "author": "REDxEYE",
     "version": (0, 0, 3),
-    "blender": (3, 3, 0),
+    "blender": (4, 3, 0),
     "description": "Import `Decima Workshop` dmf files",
     "category": "Import-Export"
 }
