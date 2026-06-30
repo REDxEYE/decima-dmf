@@ -9,6 +9,8 @@ from typing import cast, Optional
 import bpy
 import numpy as np
 import numpy.typing as npt
+
+# noinspection PyUnresolvedReferences
 from mathutils import Vector, Quaternion, Matrix
 
 from .dmf import (DMFMaterial, DMFMesh, DMFModel, DMFNode,
@@ -384,7 +386,7 @@ def build_material(material: DMFMaterial, bl_material, scene: DMFSceneFile):
             texture_node.image.colorspace_settings.name = 'Non-Color'
 
         if use_rgb_split:
-            rgb_split = create_node(bl_material, Nodes.ShaderNodeSeparateRGB)
+            rgb_split = create_node(bl_material, Nodes.ShaderNodeSeparateColor)
             connect_nodes(bl_material, texture_node.outputs["Color"], rgb_split.inputs[0])
             for texture_descriptor in texture_descriptors:
                 for channel in texture_descriptor.channels:
